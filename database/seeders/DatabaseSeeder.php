@@ -19,7 +19,7 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             UserSeeder::class,
-            SystemReferenceSeeder::class,
+            // SystemReferenceSeeder::class,
         ]);
     }
 }

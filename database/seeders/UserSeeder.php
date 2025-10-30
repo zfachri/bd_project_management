@@ -10,103 +10,117 @@ use Carbon\Carbon;
 
 class UserSeeder extends Seeder
 {
-    /**
-     * Run the database seeds.
-     */
     public function run(): void
     {
         $timestamp = Carbon::now()->timestamp;
 
-        // User 1: Admin - Active
-        $userId1 = DB::table('User')->insertGetId([
-            'UserID' => 1000000,
-            'AtTimeStamp' => $timestamp,
-            'ByUserID' => 1,
-            'OperationCode' => 'I',
-            'IsAdministrator' => true,
-            'FullName' => 'Administrator',
-            'Email' => 'admin@example.com',
-            'Password' => Hash::make('password123'),
-            'UTCCode' => '+07:00',
-        ]);
+        DB::transaction(function () use ($timestamp) {
+            // User 1: Admin - Active
+            $salt1 = Str::uuid()->toString();
+            $userId1 = DB::table('User')->insert([
+                'UserID' => 1000000,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => 1,
+                'OperationCode' => 'I',
+                'IsAdministrator' => true,
+                'FullName' => 'Administrator',
+                'Email' => 'admin@example.com',
+                'Password' => Hash::make('123456'.$salt1),
+                'UTCCode' => '+07:00',
+            ]);
 
-        DB::table('LoginCheck')->insert([
-            'UserID' => $userId1,
-            'UserStatusCode' => '99', // Active
-            'IsChangePassword' => false,
-            'Salt' => Str::uuid()->toString(),
-            'LastLoginTimeStamp' => $timestamp,
-            'LastLoginLocationJSON' => json_encode(['Longitude' => '106.8456', 'Latitude' => '-6.2088']),
-            'LastLoginAttemptCounter' => 0,
-        ]);
+            $this->command->info("Inserted Admin ID: {$userId1}");
 
-        // User 2: Regular User - New
-        $userId2 = DB::table('User')->insertGetId([
-            'UserID' => 1000001,
-            'AtTimeStamp' => $timestamp,
-            'ByUserID' => 1,
-            'OperationCode' => 'I',
-            'IsAdministrator' => false,
-            'FullName' => 'John Doe',
-            'Email' => 'john.doe@example.com',
-            'Password' => Hash::make('password123'),
-            'UTCCode' => '+07:00',
-        ]);
+            DB::table('LoginCheck')->insert([
+                'UserID' => 1000000,
+                'UserStatusCode' => '99', // Active
+                'IsChangePassword' => false,
+                'Salt' => $salt1,
+                'LastLoginTimeStamp' => $timestamp,
+                'LastLoginLocationJSON' => json_encode([
+                    'Longitude' => '106.8456',
+                    'Latitude' => '-6.2088'
+                ]),
+                'LastLoginAttemptCounter' => 0,
+            ]);
 
-        DB::table('LoginCheck')->insert([
-            'UserID' => $userId2,
-            'UserStatusCode' => '11', // New
-            'IsChangePassword' => true,
-            'Salt' => Str::uuid()->toString(),
-            'LastLoginTimeStamp' => null,
-            'LastLoginLocationJSON' => null,
-            'LastLoginAttemptCounter' => 0,
-        ]);
+            // User 2: Regular User - New
+            $salt2 = Str::uuid()->toString();
+            $userId2 = DB::table('User')->insert([
+                'UserID' => 1000001,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => 1,
+                'OperationCode' => 'I',
+                'IsAdministrator' => false,
+                'FullName' => 'John Doe',
+                'Email' => 'john.doe@example.com',
+                'Password' => Hash::make('123456'.$salt2),
+                'UTCCode' => '+07:00',
+            ]);
 
-        // User 3: Regular User - Suspended
-        $userId3 = DB::table('User')->insertGetId([
-            'UserID' => 1000003,
-            'AtTimeStamp' => $timestamp,
-            'ByUserID' => 1,
-            'OperationCode' => 'I',
-            'IsAdministrator' => false,
-            'FullName' => 'Jane Smith',
-            'Email' => 'jane.smith@example.com',
-            'Password' => Hash::make('password123'),
-            'UTCCode' => '+07:00',
-        ]);
+            DB::table('LoginCheck')->insert([
+                'UserID' => 1000001,
+                'UserStatusCode' => '11', // New
+                'IsChangePassword' => true,
+                'Salt' => $salt2,
+                'LastLoginTimeStamp' => null,
+                'LastLoginLocationJSON' => null,
+                'LastLoginAttemptCounter' => 0,
+            ]);
 
-        DB::table('LoginCheck')->insert([
-            'UserID' => $userId3,
-            'UserStatusCode' => '10', // Suspended
-            'IsChangePassword' => false,
-            'Salt' => Str::uuid()->toString(),
-            'LastLoginTimeStamp' => $timestamp - 86400,
-            'LastLoginLocationJSON' => json_encode(['Longitude' => '106.8456', 'Latitude' => '-6.2088']),
-            'LastLoginAttemptCounter' => 0,
-        ]);
+            // User 3: Suspended
+            $salt3 = Str::uuid()->toString();
+            $userId3 = DB::table('User')->insert([
+                'UserID' => 1000002,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => 1,
+                'OperationCode' => 'I',
+                'IsAdministrator' => false,
+                'FullName' => 'Jane Smith',
+                'Email' => 'jane.smith@example.com',
+                'Password' => Hash::make('123456'.$salt3),
+                'UTCCode' => '+07:00',
+            ]);
 
-        // User 4: Regular User - Blocked
-        $userId4 = DB::table('User')->insertGetId([
-            'UserID' => 1000004,
-            'AtTimeStamp' => $timestamp,
-            'ByUserID' => 1,
-            'OperationCode' => 'I',
-            'IsAdministrator' => false,
-            'FullName' => 'Bob Wilson',
-            'Email' => 'bob.wilson@example.com',
-            'Password' => Hash::make('password123'),
-            'UTCCode' => '+07:00',
-        ]);
+            DB::table('LoginCheck')->insert([
+                'UserID' => 1000002,
+                'UserStatusCode' => '10', // Suspended
+                'IsChangePassword' => false,
+                'Salt' => Str::uuid()->toString(),
+                'LastLoginTimeStamp' => $timestamp - 86400,
+                'LastLoginLocationJSON' => json_encode([
+                    'Longitude' => '106.8456',
+                    'Latitude' => '-6.2088'
+                ]),
+                'LastLoginAttemptCounter' => 0,
+            ]);
 
-        DB::table('LoginCheck')->insert([
-            'UserID' => $userId4,
-            'UserStatusCode' => '00', // Blocked
-            'IsChangePassword' => false,
-            'Salt' => Str::uuid()->toString(),
-            'LastLoginTimeStamp' => $timestamp - 172800,
-            'LastLoginLocationJSON' => json_encode(['Longitude' => '106.8456', 'Latitude' => '-6.2088']),
-            'LastLoginAttemptCounter' => 5,
-        ]);
+            // User 4: Blocked
+            $salt4 = Str::uuid()->toString();
+            $userId4 = DB::table('User')->insert([
+                'UserID' => 1000003,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => 1,
+                'OperationCode' => 'I',
+                'IsAdministrator' => false,
+                'FullName' => 'Bob Wilson',
+                'Email' => 'bob.wilson@example.com',
+                'Password' => Hash::make('123456'.$salt4),
+                'UTCCode' => '+07:00',
+            ]);
+
+            DB::table('LoginCheck')->insert([
+                'UserID' => 1000003,
+                'UserStatusCode' => '00', // Blocked
+                'IsChangePassword' => false,
+                'Salt' => Str::uuid()->toString(),
+                'LastLoginTimeStamp' => $timestamp - 172800,
+                'LastLoginLocationJSON' => json_encode([
+                    'Longitude' => '106.8456',
+                    'Latitude' => '-6.2088'
+                ]),
+                'LastLoginAttemptCounter' => 5,
+            ]);
+        });
     }
 }
