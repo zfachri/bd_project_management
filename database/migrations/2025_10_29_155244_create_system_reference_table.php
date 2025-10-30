@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('system_reference', function (Blueprint $table) {
+        Schema::create('SystemReference', function (Blueprint $table) {
             $table->id('SystemReferenceID');
             $table->bigInteger('AtTimeStamp');
             $table->unsignedBigInteger('ByUserID');

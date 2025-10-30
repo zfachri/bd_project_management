@@ -18,7 +18,8 @@ class UserSeeder extends Seeder
         $timestamp = Carbon::now()->timestamp;
 
         // User 1: Admin - Active
-        $userId1 = DB::table('user')->insertGetId([
+        $userId1 = DB::table('User')->insertGetId([
+            'UserID' => 1000000,
             'AtTimeStamp' => $timestamp,
             'ByUserID' => 1,
             'OperationCode' => 'I',
@@ -29,7 +30,7 @@ class UserSeeder extends Seeder
             'UTCCode' => '+07:00',
         ]);
 
-        DB::table('login_check')->insert([
+        DB::table('LoginCheck')->insert([
             'UserID' => $userId1,
             'UserStatusCode' => '99', // Active
             'IsChangePassword' => false,
@@ -40,7 +41,8 @@ class UserSeeder extends Seeder
         ]);
 
         // User 2: Regular User - New
-        $userId2 = DB::table('user')->insertGetId([
+        $userId2 = DB::table('User')->insertGetId([
+            'UserID' => 1000001,
             'AtTimeStamp' => $timestamp,
             'ByUserID' => 1,
             'OperationCode' => 'I',
@@ -51,7 +53,7 @@ class UserSeeder extends Seeder
             'UTCCode' => '+07:00',
         ]);
 
-        DB::table('login_check')->insert([
+        DB::table('LoginCheck')->insert([
             'UserID' => $userId2,
             'UserStatusCode' => '11', // New
             'IsChangePassword' => true,
@@ -62,7 +64,8 @@ class UserSeeder extends Seeder
         ]);
 
         // User 3: Regular User - Suspended
-        $userId3 = DB::table('user')->insertGetId([
+        $userId3 = DB::table('User')->insertGetId([
+            'UserID' => 1000003,
             'AtTimeStamp' => $timestamp,
             'ByUserID' => 1,
             'OperationCode' => 'I',
@@ -73,7 +76,7 @@ class UserSeeder extends Seeder
             'UTCCode' => '+07:00',
         ]);
 
-        DB::table('login_check')->insert([
+        DB::table('LoginCheck')->insert([
             'UserID' => $userId3,
             'UserStatusCode' => '10', // Suspended
             'IsChangePassword' => false,
@@ -84,7 +87,8 @@ class UserSeeder extends Seeder
         ]);
 
         // User 4: Regular User - Blocked
-        $userId4 = DB::table('user')->insertGetId([
+        $userId4 = DB::table('User')->insertGetId([
+            'UserID' => 1000004,
             'AtTimeStamp' => $timestamp,
             'ByUserID' => 1,
             'OperationCode' => 'I',
@@ -95,7 +99,7 @@ class UserSeeder extends Seeder
             'UTCCode' => '+07:00',
         ]);
 
-        DB::table('login_check')->insert([
+        DB::table('LoginCheck')->insert([
             'UserID' => $userId4,
             'UserStatusCode' => '00', // Blocked
             'IsChangePassword' => false,
