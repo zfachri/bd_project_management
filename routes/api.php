@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\OrganizationController;
 use App\Http\Controllers\Api\PositionController;
 use App\Http\Controllers\Api\PositionLevelController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\EmployeeController;
 
 /*
 |--------------------------------------------------------------------------
@@ -25,7 +26,7 @@ Route::prefix('auth')->group(function () {
 // Protected routes (authentication required)
 Route::middleware(['jwt.auth'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
-    
+
     Route::prefix('users')->group(function () {
         Route::get('/', [UserController::class, 'index']);
         Route::get('/{id}', [UserController::class, 'show']);
@@ -35,7 +36,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::patch('/{id}/toggle-suspend', [UserController::class, 'toggleSuspend']);
     });
 
-     // Position Level Management
+    // Position Level Management
     Route::prefix('position-levels')->group(function () {
         Route::get('/', [PositionLevelController::class, 'index']);
         Route::get('/all', [PositionLevelController::class, 'all']);
@@ -71,4 +72,19 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::patch('/{id}/toggle-active', [PositionController::class, 'toggleActive']);
     });
 
+    // Employee Management (with Position)
+    Route::prefix('employees')->group(function () {
+        Route::get('/', [EmployeeController::class, 'index']);
+        Route::get('/all', [EmployeeController::class, 'all']);
+        Route::get('/{id}', [EmployeeController::class, 'show']);
+        Route::post('/', [EmployeeController::class, 'store']);
+        Route::put('/{id}', [EmployeeController::class, 'update']);
+        Route::delete('/{id}', [EmployeeController::class, 'destroy']);
+        Route::patch('/{id}/resign', [EmployeeController::class, 'resign']);
+
+        // Employee Position Management
+        Route::post('/{id}/positions', [EmployeeController::class, 'addPosition']);
+        Route::put('/{id}/positions/{positionId}', [EmployeeController::class, 'updatePosition']);
+        Route::delete('/{id}/positions/{positionId}', [EmployeeController::class, 'removePosition']);
+    });
 });

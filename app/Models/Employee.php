@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class Employee extends Model
 {
-     protected $table = 'Employee';
+    protected $table = 'Employee';
     protected $primaryKey = 'EmployeeID';
     public $timestamps = false;
 
@@ -47,6 +47,26 @@ class Employee extends Model
     public function createdBy()
     {
         return $this->belongsTo(User::class, 'ByUserID', 'UserID');
+    }
+
+    public function employeePositions()
+    {
+        return $this->hasMany(EmployeePosition::class, 'EmployeeID', 'EmployeeID');
+    }
+
+    public function activePositions()
+    {
+        return $this->hasMany(EmployeePosition::class, 'EmployeeID', 'EmployeeID')
+            ->active()
+            ->whereNull('EndDate');
+    }
+
+    public function currentPosition()
+    {
+        return $this->hasOne(EmployeePosition::class, 'EmployeeID', 'EmployeeID')
+            ->active()
+            ->whereNull('EndDate')
+            ->latest('StartDate');
     }
 
     // Helper methods
