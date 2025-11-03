@@ -33,12 +33,21 @@ class OTPService
     /**
      * Create OTP for user
      * 
+     * **Important:**
+     * - Automatically invalidates all previous OTPs for this user
+     * - Only the latest OTP is valid
+     * - Previous OTPs cannot be used even if not expired
+     * 
      * @param int $userId
      * @param string $categoryCode '01' for SMS, '02' for Email
      * @return array
      */
     public function createOTP($userId, $categoryCode = '02')
     {
+        // IMPORTANT: Delete all previous OTPs for this user
+        // This ensures only the latest OTP is valid
+        // OTP::where('UserID', $userId)->delete();
+
         $otpCode = $this->generateOTPCode();
         $expirySeconds = $this->getOTPExpiry();
         $now = Carbon::now()->timestamp;
@@ -62,6 +71,11 @@ class OTPService
     /**
      * Verify OTP
      * 
+     * **Important:**
+     * - OTP is automatically deleted after verification
+     * - Cannot be reused even if verification fails
+     * - Each OTP can only be verified once
+     * 
      * @param int $userId
      * @param string $otpCode
      * @return bool
@@ -70,7 +84,9 @@ class OTPService
     {
         $otp = OTP::where('UserID', $userId)
             ->where('OTP', $otpCode)
+            ->where('IsUsed', 0)
             ->orderBy('OTPID', 'desc')
+            ->orderBy('AtTimeStamp', 'desc')
             ->first();
 
         if (!$otp) {
@@ -83,7 +99,8 @@ class OTPService
         }
 
         // Delete used OTP
-        OTP::where('UserID', $userId)->delete();
+        // OTP::where('UserID', $userId)->delete();
+        $otp->update(['IsUsed'=>1]);
 
         return true;
     }

@@ -15,6 +15,9 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 
+/**
+ * @tags Authentication
+ */
 class AuthController extends Controller
 {
     protected $otpService;
@@ -25,7 +28,18 @@ class AuthController extends Controller
     }
 
     /**
-     * Login
+     * User Login
+     * 
+     * Authenticate user with email/UserID and password.
+     * Returns JWT access token and refresh token on successful authentication.
+     * 
+     * **Login Flow:**
+     * - Active User (Status 99): Returns tokens immediately
+     * - New User (Status 11): Sends OTP to email/SMS
+     * - Blocked User (Status 00): Returns error 403
+     * - Suspended User (Status 10): Returns error 403
+     * 
+     * @unauthenticated
      */
     public function login(Request $request)
     {
@@ -56,13 +70,13 @@ class AuthController extends Controller
         $loginCheck = $user->loginCheck;
 
         // Check password
-        if (!Hash::check($request->Password.$loginCheck->Salt, $user->Password)) {
+        if (!Hash::check($request->Password . $loginCheck->Salt, $user->Password)) {
             // Increment login attempt counter
             $this->incrementLoginAttempt($user->UserID);
-            
+
             // Log failed login
             $this->logLogin($user->UserID, false, $request);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid credentials'
@@ -89,7 +103,7 @@ class AuthController extends Controller
         if ($loginCheck->UserStatusCode === '11') {
             // Check if request wants SMS
             $sendViaSMS = $request->send_via === 'sms';
-            
+
             if ($sendViaSMS) {
                 $otpResult = $this->otpService->sendOTPSMS($user, 'login');
             } else {
@@ -100,7 +114,7 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'OTP sent successfully',
                 'data' => [
-                    'UserID' => $user->UserID,
+                    'UserID' => (string) $user->UserID,
                     'Status' => 'otp_required',
                     'OTPSentVia' => $sendViaSMS ? 'sms' : 'email',
                     'ExpiresIn' => $otpResult['expires_in'],
@@ -115,7 +129,7 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Password change required',
                 'data' => [
-                    'UserID' => $user->UserID,
+                    'UserID' => (string) $user->UserID,
                     'Status' => 'password_change_required',
                     'RequiresPasswordChange' => true
                 ]
@@ -135,8 +149,8 @@ class AuthController extends Controller
 
         // Generate tokens
         $accessToken = JWTHelper::generateAccessToken(
-            $user->UserID, 
-            $user->Email, 
+            $user->UserID,
+            $user->Email,
             $user->IsAdministrator
         );
         $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
@@ -146,11 +160,11 @@ class AuthController extends Controller
             'message' => 'Login successful',
             'data' => [
                 'user' => [
-                    'UserID' => $user->UserID,
+                    'UserID' => (string) $user->UserID,
                     'FullName' => $user->FullName,
                     'Email' => $user->Email,
                     'IsAdministrator' => $user->IsAdministrator,
-                    'UTCCode'=> $user->UTCCode
+                    'UTCCode' => $user->UTCCode
                 ],
                 'access_token' => $accessToken,
                 'refresh_token' => $refreshToken,
@@ -161,7 +175,13 @@ class AuthController extends Controller
     }
 
     /**
-     * Verify OTP after login
+     * Verify OTP
+     * 
+     * Verify OTP code sent to user's email or phone.
+     * After successful verification, if IsChangePassword=1, user must change password.
+     * Otherwise, returns JWT tokens.
+     * 
+     * @unauthenticated
      */
     public function verifyOTP(Request $request)
     {
@@ -209,7 +229,7 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'OTP verified. Password change required.',
                 'data' => [
-                    'UserID' => $user->UserID,
+                    'UserID' => (string) $user->UserID,
                     'Status' => 'password_change_required',
                     'RequiresPasswordChange' => true
                 ]
@@ -224,8 +244,8 @@ class AuthController extends Controller
 
         // Generate tokens
         $accessToken = JWTHelper::generateAccessToken(
-            $user->UserID, 
-            $user->Email, 
+            $user->UserID,
+            $user->Email,
             $user->IsAdministrator
         );
         $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
@@ -250,12 +270,22 @@ class AuthController extends Controller
     }
 
     /**
-     * Change Password (for IsChangePassword = 1)
+     * Change Password (Authenticated)
+     * 
+     * Change user password (requires authentication).
+     * User must be logged in and can only change their own password.
+     * Requires old password verification.
+     * 
+     * **Use Cases:**
+     * - User wants to change password while logged in
+     * - After first login (IsChangePassword=1)
+     * - Regular password update
+     * 
+     * **Note:** For forgot password scenario, use `/auth/reset-password` endpoint instead.
      */
     public function changePassword(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'UserID' => 'required|integer',
             'OldPassword' => 'required|string|min:6',
             'NewPassword' => 'required|string|min:6|confirmed',
         ]);
@@ -268,7 +298,9 @@ class AuthController extends Controller
             ], 422);
         }
 
-        $user = User::find($request->UserID);
+        // Get authenticated user from JWT token (injected by middleware)
+        $authUserId = $request->auth_user_id;
+        $user = User::find($authUserId);
 
         if (!$user) {
             return response()->json([
@@ -280,26 +312,37 @@ class AuthController extends Controller
         $userCheck = $user->loginCheck;
 
         // Verify old password
-        if (!Hash::check($request->OldPassword.$userCheck->Salt, $user->Password)) {
+        if (!Hash::check($request->OldPassword . $userCheck->Salt, $user->Password)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Old password is incorrect'
             ], 401);
         }
 
-        // Update password
+        // Check if new password is same as old password
+        if ($request->OldPassword === $request->NewPassword) {
+            return response()->json([
+                'success' => false,
+                'message' => 'New password must be different from old password'
+            ], 422);
+        }
+
+        // Generate new salt for password change
+        $newSalt = Str::uuid()->toString();
+
+        // Update password with new salt
         $timestamp = Carbon::now()->timestamp;
         $user->update([
-            'Password' => Hash::make($request->NewPassword.$userCheck->Salt),
+            'Password' => Hash::make($request->NewPassword . $newSalt),
             'AtTimeStamp' => $timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U'
         ]);
 
-        // Update login check - set IsChangePassword to false
+        // Update login check - set IsChangePassword to false and update salt
         $user->loginCheck->update([
             'IsChangePassword' => false,
-            'Salt' => Str::uuid()->toString()
+            'Salt' => $newSalt
         ]);
 
         // Create audit log
@@ -313,16 +356,10 @@ class AuthController extends Controller
             'Note' => 'User changed password'
         ]);
 
-        // Log successful login after password change
-        $this->logLogin($user->UserID, true, $request);
-
-        // Update last login timestamp
-        $this->updateLastLogin($user->UserID, $request);
-
-        // Generate tokens
+        // Generate new tokens with updated credentials
         $accessToken = JWTHelper::generateAccessToken(
-            $user->UserID, 
-            $user->Email, 
+            $user->UserID,
+            $user->Email,
             $user->IsAdministrator
         );
         $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
@@ -347,12 +384,21 @@ class AuthController extends Controller
     }
 
     /**
-     * Forgot Password - Request OTP
+     * Forgot Password
+     * 
+     * Request OTP for password reset.
+     * User can provide UserID or Email as identifier.
+     * If you are using UserID you can still need to sent the body using "Email" property.
+     * OTP will be sent via email by default, or SMS if specified.
+     * 
+     * @unauthenticated
      */
     public function forgotPassword(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'Email' => 'required|string', // UserID or Email
+            // UserID or Email
+            'Email' => 'required|string', 
+            'SendVia' => 'nullable|string'
         ]);
 
         if ($validator->fails()) {
@@ -376,8 +422,8 @@ class AuthController extends Controller
         }
 
         // Check if request wants SMS
-        $sendViaSMS = $request->send_via === 'sms';
-        
+        $sendViaSMS = $request->SendVia === 'sms';
+
         if ($sendViaSMS) {
             $otpResult = $this->otpService->sendOTPSMS($user, 'reset_password');
         } else {
@@ -407,14 +453,19 @@ class AuthController extends Controller
     }
 
     /**
-     * Reset Password with OTP
+     * Reset Password
+     * 
+     * Reset password using OTP code.
+     * After successful reset, user can login with new password.
+     * 
+     * @unauthenticated
      */
     public function resetPassword(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'UserID' => 'required|integer',
+            'UserID' => 'required|string',
             'OTPCode' => 'required|string|size:4',
-            'NewPassword' => 'required|string|min:6|confirmed',
+            'NewPassword' => 'required|string|size:6|confirmed',
         ]);
 
         if ($validator->fails()) {
@@ -446,7 +497,7 @@ class AuthController extends Controller
         // Update password
         $timestamp = Carbon::now()->timestamp;
         $user->update([
-            'Password' => Hash::make($request->new_password.$userCheck->Salt),
+            'Password' => Hash::make($request->new_password . $userCheck->Salt),
             'AtTimeStamp' => $timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U'
@@ -475,79 +526,108 @@ class AuthController extends Controller
         ], 200);
     }
 
-    /**
-     * Refresh Token
-     */
-    public function refreshToken(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'refresh_token' => 'required|string',
+/**
+ * Refresh Token
+ * 
+ * Refresh JWT access token using refresh token.
+ * Returns new access token and refresh token.
+ * 
+ * **Important:**
+ * - Each refresh token can only be used once
+ * - After use, the old refresh token becomes invalid
+ * - Even if the old token hasn't expired, it cannot be reused
+ * - This prevents token replay attacks
+ * 
+ * @unauthenticated
+ */
+public function refreshToken(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'refresh_token' => 'required|string',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Validation error',
+            'errors' => $validator->errors()
+        ], 422);
+    }
+
+    try {
+        // Verify and validate refresh token
+        $tokenData = JWTHelper::verifyRefreshToken($request->refresh_token);
+
+        $userId = $tokenData['user_id'];
+        $user = User::find($userId);
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        }
+
+        // Check if user is active
+        if (!$user->isActive()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User account is not active'
+            ], 403);
+        }
+
+        // Mark old refresh token as used (one-time use)
+        JWTHelper::markRefreshTokenAsUsed($request->refresh_token);
+
+        // Generate new tokens
+        $accessToken = JWTHelper::generateAccessToken(
+            $user->UserID, 
+            $user->Email, 
+            $user->IsAdministrator
+        );
+        $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
+
+        // Create audit log
+        AuditLog::create([
+            'AtTimeStamp' => Carbon::now()->timestamp,
+            'ByUserID' => $userId,
+            'OperationCode' => 'U',
+            'ReferenceTable' => 'user',
+            'ReferenceRecordID' => $userId,
+            'Data' => json_encode(['action' => 'token_refreshed']),
+            'Note' => 'User refreshed access token'
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation error',
-                'errors' => $validator->errors()
-            ], 422);
-        }
+        return response()->json([
+            'success' => true,
+            'message' => 'Token refreshed successfully',
+            'data' => [
+                'access_token' => $accessToken,
+                'refresh_token' => $refreshToken,
+                'token_type' => 'Bearer',
+                'expires_in' => config('jwt.access_token_expire', 3600)
+            ]
+        ], 200);
 
-        try {
-            $decoded = JWTHelper::verifyToken($request->refresh_token);
-
-            // Check if token type is refresh
-            if ($decoded['type'] !== 'refresh') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid token type'
-                ], 401);
-            }
-
-            $userId = $decoded['sub'];
-            $user = User::find($userId);
-
-            if (!$user) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'User not found'
-                ], 404);
-            }
-
-            // Generate new tokens
-            $accessToken = JWTHelper::generateAccessToken(
-                $user->UserID, 
-                $user->Email, 
-                $user->IsAdministrator
-            );
-            $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Token refreshed successfully',
-                'data' => [
-                    'access_token' => $accessToken,
-                    'refresh_token' => $refreshToken,
-                    'token_type' => 'Bearer',
-                    'expires_in' => config('jwt.access_token_expire', 3600)
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid or expired refresh token'
-            ], 401);
-        }
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => $e->getMessage()
+        ], 401);
     }
+}
 
     /**
      * Logout
+     * 
+     * Logout user and invalidate tokens.
+     * Creates audit log entry for logout action.
      */
     public function logout(Request $request)
     {
         try {
             $token = $request->bearerToken();
-            
+
             if (!$token) {
                 return response()->json([
                     'success' => false,
@@ -556,6 +636,9 @@ class AuthController extends Controller
             }
 
             $userId = JWTHelper::getUserIdFromToken($token);
+
+             // Revoke all refresh tokens for this user
+            JWTHelper::revokeAllRefreshTokens($userId);
 
             // Create audit log
             AuditLog::create([
@@ -572,7 +655,6 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Logout successful'
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -593,7 +675,7 @@ class AuthController extends Controller
             'LoginLocationJSON' => json_encode([
                 'IP' => $request->ip(),
                 'UserAgent' => $request->userAgent()
-            ])
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
         ]);
     }
 
@@ -607,7 +689,7 @@ class AuthController extends Controller
             'LastLoginLocationJSON' => json_encode([
                 'IP' => $request->ip(),
                 'UserAgent' => $request->userAgent()
-            ])
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
         ]);
     }
 
@@ -618,10 +700,10 @@ class AuthController extends Controller
     {
         $loginCheck = LoginCheck::where('UserID', $userId)->first();
         $counter = $loginCheck->LastLoginAttemptCounter + 1;
-        
+
         // Get max attempt from system reference
         $maxAttempt = 5; // Default
-        
+
         // If max attempt reached, block user
         if ($counter >= $maxAttempt) {
             $loginCheck->update([

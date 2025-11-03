@@ -6,6 +6,7 @@ use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
+use App\Models\RefreshToken;
 
 class JWTHelper
 {
@@ -65,7 +66,99 @@ class JWTHelper
             'type' => 'refresh'
         ];
 
-        return JWT::encode($payload, self::getPrivateKey(), 'RS256');
+        $token = JWT::encode($payload, self::getPrivateKey(), 'RS256');
+
+                // Store token in database
+        RefreshToken::create([
+            'UserID' => $userId,
+            'Token' => hash('sha256', $token), // Store hash for security
+            'ExpiresAt' => $expiration,
+            'IsUsed' => false,
+            'UsedAt' => null,
+            'CreatedAt' => $issuedAt,
+        ]);
+
+        return $token;
+    }
+
+     /**
+     * Verify and validate refresh token
+     */
+    public static function verifyRefreshToken($token)
+    {
+        try {
+            // Decode token
+            $decoded = JWT::decode($token, new Key(self::getPublicKey(), 'RS256'));
+            $decodedArray = (array) $decoded;
+
+            // Check if token type is refresh
+            if ($decodedArray['type'] !== 'refresh') {
+                throw new \Exception('Invalid token type');
+            }
+
+            // Check if token exists and is valid in database
+            $tokenHash = hash('sha256', $token);
+            $storedToken = RefreshToken::where('Token', $tokenHash)
+                ->where('UserID', $decodedArray['sub'])
+                ->first();
+
+            if (!$storedToken) {
+                throw new \Exception('Refresh token not found');
+            }
+
+            if ($storedToken->IsUsed) {
+                throw new \Exception('Refresh token already used');
+            }
+
+            if ($storedToken->isExpired()) {
+                throw new \Exception('Refresh token expired');
+            }
+
+            return [
+                'valid' => true,
+                'user_id' => $decodedArray['sub'],
+                'email' => $decodedArray['email'],
+                'token_record' => $storedToken
+            ];
+
+        } catch (\Exception $e) {
+            throw new \Exception('Invalid refresh token: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Mark refresh token as used
+     */
+    public static function markRefreshTokenAsUsed($token)
+    {
+        $tokenHash = hash('sha256', $token);
+        $storedToken = RefreshToken::where('Token', $tokenHash)->first();
+        
+        if ($storedToken) {
+            $storedToken->markAsUsed();
+        }
+    }
+
+    /**
+     * Revoke all refresh tokens for a user
+     */
+    public static function revokeAllRefreshTokens($userId)
+    {
+        RefreshToken::where('UserID', $userId)
+            ->where('IsUsed', false)
+            ->update([
+                'IsUsed' => true,
+                'UsedAt' => Carbon::now()->timestamp,
+            ]);
+    }
+
+    /**
+     * Clean expired refresh tokens
+     */
+    public static function cleanExpiredTokens()
+    {
+        $now = Carbon::now()->timestamp;
+        RefreshToken::where('ExpiresAt', '<', $now)->delete();
     }
 
     /**

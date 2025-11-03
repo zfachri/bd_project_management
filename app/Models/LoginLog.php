@@ -21,6 +21,7 @@ class LoginLog extends Model
         'UserID' => 'integer',
         'IsSuccessful' => 'boolean',
         'LoginTimeStamp' => 'integer',
+        'LoginLocationJSON' => 'string'
     ];
 
     // Relationships
