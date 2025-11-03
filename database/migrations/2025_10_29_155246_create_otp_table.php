@@ -18,6 +18,7 @@ return new class extends Migration
             $table->unsignedBigInteger('UserID');
             $table->char('OTPCategoryCode', 2);
             $table->char('OTP', 4);
+            $table->boolean('IsUsed')->default(0);
         });
     }
 
