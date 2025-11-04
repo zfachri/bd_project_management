@@ -20,9 +20,11 @@ class Organization extends Model
         'OrganizationName',
         'IsActive',
         'IsDelete',
+        'OrganizationID'
     ];
 
     protected $casts = [
+        'OrganizationID' => 'integer',
         'AtTimeStamp' => 'integer',
         'ByUserID' => 'integer',
         'ParentOrganizationID' => 'integer',

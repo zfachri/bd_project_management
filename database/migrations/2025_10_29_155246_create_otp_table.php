@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('OTP', function (Blueprint $table) {
-            $table->id('OTPID');
+            $table->unsignedBigInteger('OTPID')->primary();
             $table->bigInteger('AtTimeStamp');
             $table->bigInteger('ExpiryTimeStamp');
             $table->unsignedBigInteger('UserID');

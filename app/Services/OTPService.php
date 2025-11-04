@@ -53,6 +53,7 @@ class OTPService
         $now = Carbon::now()->timestamp;
         
         $otp = OTP::create([
+            'OTPID' => Carbon::now()->timestamp.random_numbersu(5),
             'AtTimeStamp' => $now,
             'ExpiryTimeStamp' => $now + $expirySeconds,
             'UserID' => $userId,

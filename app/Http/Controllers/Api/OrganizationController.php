@@ -164,7 +164,7 @@ class OrganizationController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'ParentOrganizationID' => 'nullable|integer|exists:organization,OrganizationID',
+            'ParentOrganizationID' => 'nullable|integer|exists:Organization,OrganizationID',
             'OrganizationName' => 'required|string|max:100',
         ]);
 
@@ -191,6 +191,7 @@ class OrganizationController extends Controller
             }
 
             $organization = Organization::create([
+                'OrganizationID' => Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -202,12 +203,17 @@ class OrganizationController extends Controller
                 'IsDelete' => false,
             ]);
 
+            if (!$organization->ParentOrganizationID) {
+                $organization->ParentOrganizationID = $organization->OrganizationID;
+                $organization->save();
+            }
+
             // Create audit log
             AuditLog::create([
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
-                'ReferenceTable' => 'organization',
+                'ReferenceTable' => 'Organization',
                 'ReferenceRecordID' => $organization->OrganizationID,
                 'Data' => json_encode([
                     'OrganizationName' => $organization->OrganizationName,
@@ -286,7 +292,7 @@ class OrganizationController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'organization',
+                'ReferenceTable' => 'Organization',
                 'ReferenceRecordID' => $organization->OrganizationID,
                 'Data' => json_encode([
                     'Old' => $oldData,
@@ -356,7 +362,7 @@ class OrganizationController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
-                'ReferenceTable' => 'organization',
+                'ReferenceTable' => 'Organization',
                 'ReferenceRecordID' => $organization->OrganizationID,
                 'Data' => json_encode([
                     'OrganizationName' => $organization->OrganizationName,

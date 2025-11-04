@@ -153,3 +153,17 @@ function random_string($length)
 
     return $key;
 }
+
+function random_numbersu($length=5)
+{
+    // Buat batas maksimum, misalnya kalau length=5 → 99999
+    $maxValue = (10 ** $length) - 1;
+
+    // Ambil angka acak antara 0 dan maxValue
+    $rand = random_int(0, $maxValue);
+
+    // Format jadi string dengan leading zero
+    $str = sprintf('%0' . $length . 'd', $rand);
+
+    return $str;
+}

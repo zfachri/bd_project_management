@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('LoginLog', function (Blueprint $table) {
-            $table->id('LoginLogID');
+            $table->unsignedBigInteger('LoginLogID')->primary();
             $table->unsignedBigInteger('UserID');
             $table->boolean('IsSuccessful')->default(false);
             $table->bigInteger('LoginTimeStamp');

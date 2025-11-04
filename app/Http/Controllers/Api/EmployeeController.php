@@ -267,7 +267,7 @@ class EmployeeController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
-                'ReferenceTable' => 'employee',
+                'ReferenceTable' => 'Employee',
                 'ReferenceRecordID' => $employee->EmployeeID,
                 'Data' => json_encode([
                     'EmployeeID' => $employee->EmployeeID,
@@ -400,7 +400,7 @@ class EmployeeController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'employee',
+                'ReferenceTable' => 'Employee',
                 'ReferenceRecordID' => $employee->EmployeeID,
                 'Data' => json_encode([
                     'Old' => $oldData,
@@ -495,7 +495,7 @@ class EmployeeController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
-                'ReferenceTable' => 'employee_position',
+                'ReferenceTable' => 'EmployeePosition',
                 'ReferenceRecordID' => $employeePosition->EmployeePositionID,
                 'Data' => json_encode([
                     'EmployeeID' => $employee->EmployeeID,
@@ -600,7 +600,7 @@ class EmployeeController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'employee_position',
+                'ReferenceTable' => 'EmployeePosition',
                 'ReferenceRecordID' => $employeePosition->EmployeePositionID,
                 'Data' => json_encode([
                     'Old' => $oldData,
@@ -672,7 +672,7 @@ class EmployeeController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
-                'ReferenceTable' => 'employee_position',
+                'ReferenceTable' => 'EmployeePosition',
                 'ReferenceRecordID' => $employeePosition->EmployeePositionID,
                 'Data' => json_encode([
                     'EmployeeID' => $employeePosition->EmployeeID,
@@ -764,7 +764,7 @@ class EmployeeController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'employee',
+                'ReferenceTable' => 'Employee',
                 'ReferenceRecordID' => $employee->EmployeeID,
                 'Data' => json_encode([
                     'ResignDate' => $request->ResignDate,
@@ -843,7 +843,7 @@ class EmployeeController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
-                'ReferenceTable' => 'employee',
+                'ReferenceTable' => 'Employee',
                 'ReferenceRecordID' => $employee->EmployeeID,
                 'Data' => json_encode([
                     'EmployeeID' => $employee->EmployeeID,

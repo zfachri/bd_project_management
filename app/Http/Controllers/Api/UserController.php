@@ -148,7 +148,7 @@ class UserController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
-                'ReferenceTable' => 'user',
+                'ReferenceTable' => 'User',
                 'ReferenceRecordID' => $user->UserID,
                 'Data' => json_encode([
                     'FullName' => $user->FullName,
@@ -258,7 +258,7 @@ class UserController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'user',
+                'ReferenceTable' => 'User',
                 'ReferenceRecordID' => $user->UserID,
                 'Data' => json_encode([
                     'Old' => $oldData,
@@ -332,7 +332,7 @@ class UserController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'user',
+                'ReferenceTable' => 'User',
                 'ReferenceRecordID' => $user->UserID,
                 'Data' => json_encode([
                     'Action' => $action,
@@ -404,7 +404,7 @@ class UserController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'user',
+                'ReferenceTable' => 'User',
                 'ReferenceRecordID' => $user->UserID,
                 'Data' => json_encode([
                     'Action' => $action,
@@ -469,7 +469,7 @@ class UserController extends Controller
     //             'AtTimeStamp' => $timestamp,
     //             'ByUserID' => $authUserId,
     //             'OperationCode' => 'D',
-    //             'ReferenceTable' => 'user',
+    //             'ReferenceTable' => 'User',
     //             'ReferenceRecordID' => $user->UserID,
     //             'Data' => json_encode([
     //                 'FullName' => $user->FullName,

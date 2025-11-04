@@ -70,7 +70,7 @@ class AuthController extends Controller
         $loginCheck = $user->loginCheck;
 
         // Check password
-        if (!Hash::check($request->Password . $loginCheck->Salt, $user->Password)) {
+        if (!Hash::check($request->Password.$loginCheck->Salt, $user->Password)) {
             // Increment login attempt counter
             $this->incrementLoginAttempt($user->UserID);
 

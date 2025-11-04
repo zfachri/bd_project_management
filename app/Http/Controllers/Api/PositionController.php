@@ -289,7 +289,7 @@ class PositionController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
-                'ReferenceTable' => 'position',
+                'ReferenceTable' => 'Position',
                 'ReferenceRecordID' => $position->PositionID,
                 'Data' => json_encode([
                     'PositionName' => $position->PositionName,
@@ -427,7 +427,7 @@ class PositionController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'position',
+                'ReferenceTable' => 'Position',
                 'ReferenceRecordID' => $position->PositionID,
                 'Data' => json_encode([
                     'Old' => $oldData,
@@ -518,7 +518,7 @@ class PositionController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
-                'ReferenceTable' => 'position',
+                'ReferenceTable' => 'Position',
                 'ReferenceRecordID' => $position->PositionID,
                 'Data' => json_encode([
                     'PositionName' => $position->PositionName,
@@ -578,7 +578,7 @@ class PositionController extends Controller
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
-                'ReferenceTable' => 'position',
+                'ReferenceTable' => 'Position',
                 'ReferenceRecordID' => $position->PositionID,
                 'Data' => json_encode([
                     'Action' => $action,
