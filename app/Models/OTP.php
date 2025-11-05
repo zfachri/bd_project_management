@@ -9,6 +9,7 @@ class OTP extends Model
     protected $table = 'OTP';
     protected $primaryKey = 'OTPID';
     public $timestamps = false;
+    public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
         'AtTimeStamp',

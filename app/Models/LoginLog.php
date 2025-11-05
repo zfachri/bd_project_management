@@ -9,6 +9,7 @@ class LoginLog extends Model
     protected $table = 'LoginLog';
     protected $primaryKey = 'LoginLogID';
     public $timestamps = false;
+    public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
         'LoginLogID',

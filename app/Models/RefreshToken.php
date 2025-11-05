@@ -9,6 +9,7 @@ class RefreshToken extends Model
     protected $table = 'RefreshToken';
     protected $primaryKey = 'RefreshTokenID';
     public $timestamps = false;
+    
 
     protected $fillable = [
         'UserID',

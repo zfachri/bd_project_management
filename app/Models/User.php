@@ -12,6 +12,7 @@ class User extends Authenticatable
     protected $table = 'User';
     protected $primaryKey = 'UserID';
     public $timestamps = false;
+    public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
         'AtTimeStamp',

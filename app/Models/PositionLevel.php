@@ -9,6 +9,7 @@ class PositionLevel extends Model
     protected $table = 'PositionLevel';
     protected $primaryKey = 'PositionLevelID';
     public $timestamps = false;
+    public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
         'PositionLevelID',

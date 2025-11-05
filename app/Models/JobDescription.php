@@ -9,6 +9,7 @@ class JobDescription extends Model
     protected $table = 'JobDescription';
     protected $primaryKey = 'RecordID';
     public $timestamps = false;
+    public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
         'RecordID',

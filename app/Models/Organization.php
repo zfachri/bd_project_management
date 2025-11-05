@@ -9,6 +9,7 @@ class Organization extends Model
     protected $table = 'Organization';
     protected $primaryKey = 'OrganizationID';
     public $timestamps = false;
+    public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
         'AtTimeStamp',

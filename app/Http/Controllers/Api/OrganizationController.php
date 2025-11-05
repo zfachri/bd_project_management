@@ -189,9 +189,9 @@ class OrganizationController extends Controller
                 $levelNo = $parent->LevelNo + 1;
                 $isChild = true;
             }
-
+            $nilai = Carbon::now()->timestamp.random_numbersu(5);
             $organization = Organization::create([
-                'OrganizationID' => Carbon::now()->timestamp.random_numbersu(5),
+                'OrganizationID' => $nilai,
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -204,7 +204,7 @@ class OrganizationController extends Controller
             ]);
 
             if (!$organization->ParentOrganizationID) {
-                $organization->ParentOrganizationID = $organization->OrganizationID;
+                $organization->ParentOrganizationID = $nilai;
                 $organization->save();
             }
 

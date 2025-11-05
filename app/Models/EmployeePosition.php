@@ -9,6 +9,7 @@ class EmployeePosition extends Model
     protected $table = 'EmployeePosition';
     protected $primaryKey = 'EmployeePositionID';
     public $timestamps = false;
+    public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
         'EmployeePositionID',

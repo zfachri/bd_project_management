@@ -9,6 +9,7 @@ class AuditLog extends Model
     protected $table = 'AuditLog';
     protected $primaryKey = 'AuditLogID';
     public $timestamps = false;
+    public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
         'AuditLogID',
