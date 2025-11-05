@@ -145,6 +145,7 @@ class UserController extends Controller
 
             // Create audit log
             AuditLog::create([
+                                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -255,6 +256,7 @@ class UserController extends Controller
 
             // Create audit log
             AuditLog::create([
+                                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -329,6 +331,7 @@ class UserController extends Controller
 
             // Create audit log
             AuditLog::create([
+                                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -401,6 +404,7 @@ class UserController extends Controller
 
             // Create audit log
             AuditLog::create([
+                                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -466,6 +470,7 @@ class UserController extends Controller
 
     //         // Create audit log before deletion
     //         AuditLog::create([
+    //             'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
     //             'AtTimeStamp' => $timestamp,
     //             'ByUserID' => $authUserId,
     //             'OperationCode' => 'D',

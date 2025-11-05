@@ -286,6 +286,7 @@ class PositionController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLog'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -424,6 +425,7 @@ class PositionController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLog'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -515,6 +517,7 @@ class PositionController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLog'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
@@ -575,6 +578,7 @@ class PositionController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLog'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',

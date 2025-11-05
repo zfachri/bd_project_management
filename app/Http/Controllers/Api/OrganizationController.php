@@ -210,6 +210,7 @@ class OrganizationController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLog'=> Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -289,6 +290,7 @@ class OrganizationController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLog'=> Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -359,6 +361,7 @@ class OrganizationController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLog'=> Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
@@ -415,6 +418,7 @@ class OrganizationController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLog'=> Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',

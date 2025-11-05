@@ -11,6 +11,7 @@ class LoginLog extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'LoginLogID',
         'UserID',
         'IsSuccessful',
         'LoginTimeStamp',
@@ -18,6 +19,7 @@ class LoginLog extends Model
     ];
 
     protected $casts = [
+        'LoginLogID'=>'integer',
         'UserID' => 'integer',
         'IsSuccessful' => 'boolean',
         'LoginTimeStamp' => 'integer',

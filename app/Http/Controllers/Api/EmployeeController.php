@@ -264,6 +264,7 @@ class EmployeeController extends Controller
 
             // Step 5: Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -397,6 +398,7 @@ class EmployeeController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -492,6 +494,7 @@ class EmployeeController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -597,6 +600,7 @@ class EmployeeController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -669,6 +673,7 @@ class EmployeeController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
@@ -761,6 +766,7 @@ class EmployeeController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -840,6 +846,7 @@ class EmployeeController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',

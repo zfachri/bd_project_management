@@ -99,6 +99,7 @@ class PositionLevelController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=> Carbon::now()->timsetamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -168,6 +169,7 @@ class PositionLevelController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=> Carbon::now()->timsetamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -217,6 +219,7 @@ class PositionLevelController extends Controller
 
     //         // Create audit log before deletion
     //         AuditLog::create([
+    //             'AuditLogID'=> Carbon::now()->timsetamp.random_numbersu(5),
     //             'AtTimeStamp' => $timestamp,
     //             'ByUserID' => $authUserId,
     //             'OperationCode' => 'D',

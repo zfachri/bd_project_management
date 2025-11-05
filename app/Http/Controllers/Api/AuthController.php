@@ -347,6 +347,7 @@ class AuthController extends Controller
 
         // Create audit log
         AuditLog::create([
+            'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
             'AtTimeStamp' => $timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U',
@@ -432,6 +433,7 @@ class AuthController extends Controller
 
         // Create audit log
         AuditLog::create([
+            'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
             'AtTimeStamp' => Carbon::now()->timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U',
@@ -515,6 +517,7 @@ class AuthController extends Controller
 
         // Create audit log
         AuditLog::create([
+            'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
             'AtTimeStamp' => $timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U',
@@ -593,6 +596,7 @@ class AuthController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => Carbon::now()->timestamp,
                 'ByUserID' => $userId,
                 'OperationCode' => 'U',
@@ -645,6 +649,7 @@ class AuthController extends Controller
 
             // Create audit log
             AuditLog::create([
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => Carbon::now()->timestamp,
                 'ByUserID' => $userId,
                 'OperationCode' => 'U',
@@ -672,6 +677,7 @@ class AuthController extends Controller
     private function logLogin($userId, $isSuccessful, $request)
     {
         LoginLog::create([
+            'LoginLogID' => Carbon::now()->timestamp.random_numbersu(5),
             'UserID' => $userId,
             'IsSuccessful' => $isSuccessful,
             'LoginTimeStamp' => Carbon::now()->timestamp,

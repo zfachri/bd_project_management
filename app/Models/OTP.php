@@ -16,12 +16,16 @@ class OTP extends Model
         'UserID',
         'OTPCategoryCode',
         'OTP',
+        'IsUsed',
+        'OTPID'
     ];
 
     protected $casts = [
         'AtTimeStamp' => 'integer',
         'ExpiryTimeStamp' => 'integer',
         'UserID' => 'integer',
+        'OTPID' => 'integer',
+        'IsUsed' => 'boolean'
     ];
 
     // Relationships

@@ -11,6 +11,7 @@ class SystemReference extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'SystemReferenceID',
         'AtTimeStamp',
         'ByUserID',
         'OperationCode',
@@ -20,6 +21,7 @@ class SystemReference extends Model
     ];
 
     protected $casts = [
+        'SystemReferenceID'=> 'integer',
         'AtTimeStamp' => 'integer',
         'ByUserID' => 'integer',
     ];

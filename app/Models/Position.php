@@ -11,6 +11,7 @@ class Position extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'PositionID',
         'AtTimeStamp',
         'ByUserID',
         'OperationCode',
@@ -26,6 +27,7 @@ class Position extends Model
     ];
 
     protected $casts = [
+        'PositionID'=>'integer',
         'AtTimeStamp' => 'integer',
         'ByUserID' => 'integer',
         'OrganizationID' => 'integer',

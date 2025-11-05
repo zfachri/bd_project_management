@@ -11,6 +11,7 @@ class AuditLog extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'AuditLogID',
         'AtTimeStamp',
         'ByUserID',
         'OperationCode',
@@ -21,6 +22,7 @@ class AuditLog extends Model
     ];
 
     protected $casts = [
+        'AuditLogID' => 'integer',
         'AtTimeStamp' => 'integer',
         'ByUserID' => 'integer',
         'ReferenceRecordID' => 'integer',

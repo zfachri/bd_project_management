@@ -11,6 +11,7 @@ class PositionLevel extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'PositionLevelID',
         'AtTimeStamp',
         'ByUserID',
         'OperationCode',
@@ -18,6 +19,7 @@ class PositionLevel extends Model
     ];
 
     protected $casts = [
+        'PositionLevelID'=>'integer',
         'AtTimeStamp' => 'integer',
         'ByUserID' => 'integer',
     ];

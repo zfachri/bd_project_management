@@ -11,6 +11,7 @@ class JobDescription extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'RecordID',
         'AtTimeStamp',
         'ByUserID',
         'OperationCode',
@@ -29,6 +30,7 @@ class JobDescription extends Model
     ];
 
     protected $casts = [
+        'RecordID'=>'integer',
         'AtTimeStamp' => 'integer',
         'ByUserID' => 'integer',
         'OrganizationID' => 'integer',
