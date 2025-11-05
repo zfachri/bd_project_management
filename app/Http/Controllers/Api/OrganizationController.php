@@ -449,4 +449,158 @@ class OrganizationController extends Controller
             ], 500);
         }
     }
+
+        /**
+     * Get organization hierarchy structure
+     * Returns organizations in nested format with children
+     */
+    public function getHierarchy(Request $request)
+    {
+        try {
+            // Get all active organizations
+            $organizations = Organization::active()
+                ->select([
+                    'OrganizationID',
+                    'ParentOrganizationID',
+                    'OrganizationName',
+                    'LevelNo',
+                    'IsChild',
+                    'IsActive'
+                ])
+                ->orderBy('LevelNo')
+                ->orderBy('OrganizationName')
+                ->get();
+
+            // Build hierarchy tree
+            $hierarchy = $this->buildHierarchy($organizations);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Organization hierarchy retrieved successfully',
+                'data' => $hierarchy
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve organization hierarchy',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Build hierarchical structure from flat organization list
+     */
+    private function buildHierarchy($organizations, $parentId = null)
+    {
+        $branch = [];
+
+        foreach ($organizations as $organization) {
+            // For root level (where ParentOrganizationID equals OrganizationID or is null)
+            if ($parentId === null) {
+                if ($organization->ParentOrganizationID == $organization->OrganizationID || 
+                    $organization->ParentOrganizationID === null ||
+                    $organization->LevelNo == 1) {
+                    
+                    $children = $this->buildHierarchy($organizations, $organization->OrganizationID);
+                    
+                    $branch[] = [
+                        'OrganizationID' => $organization->OrganizationID,
+                        'OrganizationName' => $organization->OrganizationName,
+                        'LevelNo' => $organization->LevelNo,
+                        'IsActive' => $organization->IsActive,
+                        'Child' => $children
+                    ];
+                }
+            } else {
+                // For child organizations
+                if ($organization->ParentOrganizationID == $parentId && 
+                    $organization->OrganizationID != $parentId) {
+                    
+                    $children = $this->buildHierarchy($organizations, $organization->OrganizationID);
+                    
+                    $branch[] = [
+                        'OrganizationID' => $organization->OrganizationID,
+                        'OrganizationName' => $organization->OrganizationName,
+                        'LevelNo' => $organization->LevelNo,
+                        'IsActive' => $organization->IsActive,
+                        'Child' => $children
+                    ];
+                }
+            }
+        }
+
+        return $branch;
+    }
+
+    /**
+     * Get hierarchy starting from specific organization
+     */
+    public function getHierarchyFrom(Request $request, $id)
+    {
+        try {
+            $organization = Organization::find($id);
+
+            if (!$organization) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Organization not found'
+                ], 404);
+            }
+
+            // Get all descendants
+            $organizations = Organization::active()
+                ->select([
+                    'OrganizationID',
+                    'ParentOrganizationID',
+                    'OrganizationName',
+                    'LevelNo',
+                    'IsChild',
+                    'IsActive'
+                ])
+                ->where('LevelNo', '>=', $organization->LevelNo)
+                ->orderBy('LevelNo')
+                ->orderBy('OrganizationName')
+                ->get();
+
+            // Build hierarchy from this organization
+            $hierarchy = $this->buildHierarchyFrom($organizations, $id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Organization hierarchy retrieved successfully',
+                'data' => $hierarchy
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve organization hierarchy',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Build hierarchy from specific organization
+     */
+    private function buildHierarchyFrom($organizations, $rootId)
+    {
+        $root = $organizations->firstWhere('OrganizationID', $rootId);
+        
+        if (!$root) {
+            return null;
+        }
+
+        $children = $this->buildHierarchy($organizations, $rootId);
+
+        return [
+            'OrganizationID' => $root->OrganizationID,
+            'OrganizationName' => $root->OrganizationName,
+            'LevelNo' => $root->LevelNo,
+            'IsActive' => $root->IsActive,
+            'Child' => $children
+        ];
+    }
 }
