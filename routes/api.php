@@ -52,18 +52,17 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::get('/', [OrganizationController::class, 'index']);
         Route::get('/all', [OrganizationController::class, 'all']);
         Route::get('/level/{level}', [OrganizationController::class, 'getByLevel']);
+                // Get full hierarchy tree
+        Route::get('/hierarchy', [OrganizationController::class, 'getHierarchy']);
+
+        // Get hierarchy from specific organization
+        Route::get('/hierarchy/{id}', [OrganizationController::class, 'getHierarchyFrom']);
         Route::get('/{id}', [OrganizationController::class, 'show']);
         Route::get('/{id}/children', [OrganizationController::class, 'getChildren']);
         Route::post('/', [OrganizationController::class, 'store']);
         Route::put('/{id}', [OrganizationController::class, 'update']);
         // Route::delete('/{id}', [OrganizationController::class, 'destroy']);
         Route::patch('/{id}/toggle-active', [OrganizationController::class, 'toggleActive']);
-
-        // Get full hierarchy tree
-        Route::get('/hierarchy', [OrganizationController::class, 'getHierarchy']);
-
-        // Get hierarchy from specific organization
-        Route::get('/hierarchy/{id}', [OrganizationController::class, 'getHierarchyFrom']);
     });
 
     // Position Management (with Job Description)

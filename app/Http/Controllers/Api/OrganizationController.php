@@ -457,8 +457,8 @@ class OrganizationController extends Controller
     public function getHierarchy(Request $request)
     {
         try {
-            // Get all active organizations
-            $organizations = Organization::active()
+            $organizations = Organization::where('IsActive', true)
+                ->where('IsDelete', false)
                 ->select([
                     'OrganizationID',
                     'ParentOrganizationID',
@@ -550,7 +550,8 @@ class OrganizationController extends Controller
             }
 
             // Get all descendants
-            $organizations = Organization::active()
+            $organizations = Organization::where('IsActive', true)
+                ->where('IsDelete', false)
                 ->select([
                     'OrganizationID',
                     'ParentOrganizationID',
