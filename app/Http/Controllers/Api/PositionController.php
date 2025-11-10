@@ -289,6 +289,7 @@ class PositionController extends Controller
             ) {
 
                 JobDescription::create([
+                    'RecordID' => Carbon::now()->timestamp.random_numbersu(5),
                     'AtTimeStamp' => $timestamp,
                     'ByUserID' => $authUserId,
                     'OperationCode' => 'I',
