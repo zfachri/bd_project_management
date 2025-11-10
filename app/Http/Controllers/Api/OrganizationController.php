@@ -468,8 +468,16 @@ class OrganizationController extends Controller
                     'IsActive'
                 ])
                 ->orderBy('LevelNo')
+                ->orderBy('OrganizationID')
                 ->orderBy('OrganizationName')
                 ->get();
+
+                \Log::info('Total Organizations: ' . $organizations->count());
+                \Log::info('Root Organizations (ParentOrganizationID = OrganizationID): ' . 
+                $organizations->filter(function($org) {
+                    return $org->ParentOrganizationID == $org->OrganizationID;
+                })->count()
+            );
 
             // Build hierarchy tree
             $hierarchy = $this->buildHierarchy($organizations);
@@ -497,11 +505,10 @@ class OrganizationController extends Controller
         $branch = [];
 
         foreach ($organizations as $organization) {
-            // For root level (where ParentOrganizationID equals OrganizationID or is null)
+            // For root level (where ParentOrganizationID equals OrganizationID)
             if ($parentId === null) {
-                if ($organization->ParentOrganizationID == $organization->OrganizationID || 
-                    $organization->ParentOrganizationID === null ||
-                    $organization->LevelNo == 1) {
+                // Root organization: ParentOrganizationID sama dengan OrganizationID
+                if ($organization->ParentOrganizationID == $organization->OrganizationID) {
                     
                     $children = $this->buildHierarchy($organizations, $organization->OrganizationID);
                     
@@ -514,9 +521,10 @@ class OrganizationController extends Controller
                     ];
                 }
             } else {
-                // For child organizations
+                // For child organizations: ParentOrganizationID sama dengan $parentId
+                // tapi OrganizationID tidak sama dengan ParentOrganizationID (bukan root)
                 if ($organization->ParentOrganizationID == $parentId && 
-                    $organization->OrganizationID != $parentId) {
+                    $organization->OrganizationID != $organization->ParentOrganizationID) {
                     
                     $children = $this->buildHierarchy($organizations, $organization->OrganizationID);
                     

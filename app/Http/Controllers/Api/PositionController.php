@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Position;
 use App\Models\JobDescription;
 use App\Models\AuditLog;
+use App\Models\EmployeePosition;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -49,7 +50,7 @@ class PositionController extends Controller
 
         $positions = $query->with('parent')->paginate($perPage);
 
-        $positions->getCollection()->transform(function($position) {
+        $positions->getCollection()->transform(function ($position) {
             return [
                 'PositionID' => $position->PositionID,
                 'OrganizationID' => $position->OrganizationID,
@@ -109,11 +110,11 @@ class PositionController extends Controller
     public function show($id)
     {
         $position = Position::with([
-            'organization', 
-            'parent', 
-            'children', 
+            'organization',
+            'parent',
+            'children',
             'positionLevel',
-            'jobDescriptions' => function($query) {
+            'jobDescriptions' => function ($query) {
                 $query->active();
             }
         ])->find($id);
@@ -201,12 +202,12 @@ class PositionController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'OrganizationID' => 'required|integer|exists:organization,OrganizationID',
-            'ParentPositionID' => 'nullable|integer|exists:position,PositionID',
+            'OrganizationID' => 'required|integer|exists:Organization,OrganizationID',
+            'ParentPositionID' => 'nullable|integer|exists:Position,PositionID',
             'PositionName' => 'required|string|max:100',
-            'PositionLevelID' => 'required|integer|exists:position_level,PositionLevelID',
+            'PositionLevelID' => 'required|integer|exists:PositionLevel,PositionLevelID',
             'RequirementQuantity' => 'nullable|integer|min:0',
-            
+
             // Job Description fields (all optional)
             'JobDescription' => 'nullable|string',
             'MainTaskDescription' => 'nullable|string',
@@ -245,6 +246,7 @@ class PositionController extends Controller
 
             // Create position
             $position = Position::create([
+                'PositionID' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -260,11 +262,13 @@ class PositionController extends Controller
             ]);
 
             // Create job description if provided
-            if ($request->has('JobDescription') || 
-                $request->has('MainTaskDescription') || 
+            if (
+                $request->has('JobDescription') ||
+                $request->has('MainTaskDescription') ||
                 $request->has('TechnicalCompetency') ||
-                $request->has('SoftCompetency')) {
-                
+                $request->has('SoftCompetency')
+            ) {
+
                 JobDescription::create([
                     'AtTimeStamp' => $timestamp,
                     'ByUserID' => $authUserId,
@@ -286,7 +290,7 @@ class PositionController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLog'=>Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -304,17 +308,16 @@ class PositionController extends Controller
             DB::commit();
 
             // Reload with relationships
-            $position->load(['organization', 'positionLevel', 'jobDescriptions']);
+            $position->load(['Organization', 'PositionLevel', 'JobDescriptions']);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Position created successfully',
                 'data' => $position
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create position',
@@ -342,7 +345,7 @@ class PositionController extends Controller
             'PositionLevelID' => 'required|integer|exists:position_level,PositionLevelID',
             'RequirementQuantity' => 'nullable|integer|min:0',
             'IsActive' => 'nullable|boolean',
-            
+
             // Job Description fields (all optional)
             'JobDescription' => 'nullable|string',
             'MainTaskDescription' => 'nullable|string',
@@ -389,7 +392,27 @@ class PositionController extends Controller
             }
 
             if ($request->has('IsActive')) {
-                $updateData['IsActive'] = $request->IsActive;
+                $updateData['IsActive'] = filter_var($request->IsActive, FILTER_VALIDATE_BOOLEAN);
+
+                if (!$updateData['IsActive']) {
+                    $existsAsParent = Position::where('ParentPositionID', $id)
+                        ->where('IsActive', true)
+                        ->where('IsDelete', false)
+                        ->exists();
+
+                    $exists = EmployeePosition::where('PositionID', $id)
+                        ->where('IsDelete', false)
+                        ->where('IsActive', true)
+                        ->exists();
+
+                    if ($exists || $existsAsParent) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'This Position is still used by another related data',
+                            'errors' => ''
+                        ], 400);
+                    }
+                }
             }
 
             $position->update($updateData);
@@ -425,7 +448,7 @@ class PositionController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLog'=>Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -453,10 +476,9 @@ class PositionController extends Controller
                 'message' => 'Position updated successfully',
                 'data' => $position
             ], 200);
-
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update position',
@@ -517,7 +539,7 @@ class PositionController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLog'=>Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
@@ -535,10 +557,9 @@ class PositionController extends Controller
                 'success' => true,
                 'message' => 'Position deleted successfully'
             ], 200);
-
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete position',
@@ -567,6 +588,37 @@ class PositionController extends Controller
 
             $newStatus = !$position->IsActive;
 
+            // ✅ Jika ingin mengaktifkan, pastikan parent aktif
+            if ($newStatus && $position->ParentPositionID) {
+                $parent = Position::find($position->ParentPositionID);
+                if ($parent && !$parent->IsActive) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'The parent position must be activated first.'
+                    ], 400);
+                }
+            }
+
+            // ✅ Jika ingin menonaktifkan, pastikan tidak dipakai oleh child atau employee
+            if (!$newStatus) {
+                $hasActiveChildren = Position::where('ParentPositionID', $id)
+                    ->where('IsActive', true)
+                    ->where('IsDelete', false)
+                    ->exists();
+
+                $usedByEmployee = EmployeePosition::where('PositionID', $id)
+                    ->where('IsActive', true)
+                    ->where('IsDelete', false)
+                    ->exists();
+
+                if ($hasActiveChildren || $usedByEmployee) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'This position cannot be deactivated because it is still used by active related data (children or employee position).'
+                    ], 400);
+                }
+            }
+
             $position->update([
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
@@ -578,7 +630,7 @@ class PositionController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLog'=>Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -600,7 +652,6 @@ class PositionController extends Controller
                     'IsActive' => $position->IsActive,
                 ]
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,

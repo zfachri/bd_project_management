@@ -39,7 +39,7 @@ class PositionLevelController extends Controller
      */
     public function all()
     {
-        $positionLevels = PositionLevel::all();
+        $positionLevels = PositionLevel::all()->sortBy('PositionLevelID');
 
         return response()->json([
             'success' => true,
@@ -91,6 +91,7 @@ class PositionLevelController extends Controller
             $authUserId = $request->auth_user_id;
 
             $positionLevel = PositionLevel::create([
+                'PositionLevelID'=> Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -99,7 +100,7 @@ class PositionLevelController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLogID'=> Carbon::now()->timsetamp.random_numbersu(5),
+                'AuditLogID'=> Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
