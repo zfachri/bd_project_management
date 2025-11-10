@@ -69,6 +69,9 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::prefix('positions')->group(function () {
         Route::get('/', [PositionController::class, 'index']);
         Route::get('/all', [PositionController::class, 'all']);
+        Route::get('/hierarchy', [PositionController::class, 'getHierarchy']);
+        Route::get('/{id}/hierarchy', [PositionController::class, 'getPositionHierarchy']);
+
         Route::get('/organization/{organizationId}', [PositionController::class, 'getByOrganization']);
         Route::get('/{id}', [PositionController::class, 'show']);
         Route::get('/{id}/children', [PositionController::class, 'getChildren']);
@@ -82,6 +85,9 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::prefix('employees')->group(function () {
         Route::get('/', [EmployeeController::class, 'index']);
         Route::get('/all', [EmployeeController::class, 'all']);
+        Route::get('/hierarchy/tree', [EmployeeController::class, 'getOrganizationHierarchyTree']);
+        Route::get('/{id}/hierarchy', [EmployeeController::class, 'getHierarchy']);
+
         Route::get('/{id}', [EmployeeController::class, 'show']);
         Route::post('/', [EmployeeController::class, 'store']);
         Route::put('/{id}', [EmployeeController::class, 'update']);

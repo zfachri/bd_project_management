@@ -36,15 +36,24 @@ class PositionController extends Controller
 
         if ($withHierarchy) {
             // Get only root positions with their children
-            $positions = Position::active()
-                ->whereNull('ParentPositionID')
-                ->with(['children', 'organization', 'positionLevel'])
-                ->get();
+            $query = Position::active()
+                ->whereColumn('ParentPositionID', 'PositionID');
+                // ->with(['children', 'positionLevel'])
+                // ->get();
+            if($organizationId) {
+                $query->where('OrganizationID', $organizationId);
+            }
+
+            $rootPositions = $query->get();
+            $tree = [];
+            foreach ($rootPositions as $rootPosition) {
+                $tree[] = $this->buildPositionHierarchy($rootPosition, $organizationId, false);
+            }
 
             return response()->json([
                 'success' => true,
                 'message' => 'Positions retrieved successfully',
-                'data' => $positions
+                'data' => $tree
             ], 200);
         }
 
@@ -90,9 +99,14 @@ class PositionController extends Controller
         }
 
         if ($withHierarchy) {
-            $positions = $query->whereNull('ParentPositionID')
-                ->with(['children', 'organization', 'positionLevel'])
+            $rootPositions = $query->whereColumn('ParentPositionID', 'PositionID')
+                // ->with(['children', 'organization', 'positionLevel'])
                 ->get();
+            $positions = [];
+            foreach ($rootPositions as $rootPosition) {
+                $positions[] = $this->buildPositionHierarchy($rootPosition, $organizationId, false);
+            }
+
         } else {
             $positions = $query->with(['organization', 'positionLevel'])->get();
         }
@@ -261,6 +275,11 @@ class PositionController extends Controller
                 'IsDelete' => false,
             ]);
 
+            if(!$position->ParentPositionID) {
+                $position->ParentOrganizationID = $position->PositionID;
+                $position->save();
+            }
+
             // Create job description if provided
             if (
                 $request->has('JobDescription') ||
@@ -317,6 +336,22 @@ class PositionController extends Controller
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
+
+            AuditLog::create([  
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'ReferenceTable' => 'Position',
+                'ReferenceRecordID' => $position->PositionID,
+                'Data' => json_encode([
+                    'PositionName' => $position->PositionName,
+                    'OrganizationID' => $position->OrganizationID,
+                    'ParentPositionID' => $position->ParentPositionID,
+                    'LevelNo' => $position->LevelNo,
+                ]),
+                'Note' => 'Position created with job description'
+            ]);
 
             return response()->json([
                 'success' => false,
@@ -660,4 +695,215 @@ class PositionController extends Controller
             ], 500);
         }
     }
+
+    /**
+ * Get position hierarchy tree (nested children)
+ * GET /api/positions/hierarchy?organization_id={id}&include_inactive=false
+ */
+public function getHierarchy(Request $request)
+{
+    $organizationId = $request->input('organization_id');
+    $includeInactive = $request->input('include_inactive', false);
+
+    $query = Position::with(['positionLevel']);
+
+    if ($organizationId) {
+        $query->where('OrganizationID', $organizationId);
+    }
+
+    if (!$includeInactive) {
+        $query->where('IsActive', true);
+    }
+
+    $query->where('IsDelete', false);
+
+    // Get root positions (where ParentPositionID = PositionID)
+    $rootPositions = $query->whereColumn('ParentPositionID', 'PositionID')->get();
+
+    $tree = [];
+    foreach ($rootPositions as $rootPosition) {
+        $tree[] = $this->buildPositionHierarchy($rootPosition, $organizationId, $includeInactive);
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Position hierarchy retrieved successfully',
+        'data' => $tree
+    ], 200);
+}
+
+/**
+ * Build position hierarchy recursively with employee count
+ * Private helper method for getHierarchy
+ */
+private function buildPositionHierarchy($position, $organizationId = null, $includeInactive = false, &$visited = [])
+{
+    // Prevent infinite loop
+    if (in_array($position->PositionID, $visited)) {
+        return null;
+    }
+    
+    $visited[] = $position->PositionID;
+
+    // Count active employees in this position
+    $employeeCount = EmployeePosition::where('PositionID', $position->PositionID)
+        ->active()
+        ->whereNull('EndDate')
+        ->count();
+
+    // Get child positions
+    $childQuery = Position::with(['positionLevel'])
+        ->where('ParentPositionID', $position->PositionID)
+        ->where('PositionID', '!=', $position->PositionID)
+        ->where('IsDelete', false);
+
+    if ($organizationId) {
+        $childQuery->where('OrganizationID', $organizationId);
+    }
+
+    if (!$includeInactive) {
+        $childQuery->where('IsActive', true);
+    }
+
+    $childPositions = $childQuery->get();
+
+    $children = [];
+    foreach ($childPositions as $childPosition) {
+        $childNode = $this->buildPositionHierarchy($childPosition, $organizationId, $includeInactive, $visited);
+        if ($childNode) {
+            $children[] = $childNode;
+        }
+    }
+
+    return [
+        'PositionID' => $position->PositionID,
+        'PositionName' => $position->PositionName,
+        'PositionLevel' => [
+            'PositionLevelID' => $position->positionLevel->PositionLevelID ?? null,
+            'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
+        ],
+        'LevelNo' => $position->LevelNo,
+        'ParentPositionID' => $position->ParentPositionID,
+        'IsChild' => $position->IsChild,
+        'IsActive' => $position->IsActive,
+        'RequirementQuantity' => $position->RequirementQuantity,
+        'EmployeeCount' => $employeeCount,
+        'Children' => $children,
+    ];
+}
+
+/**
+ * Get position detail with full hierarchy context
+ * GET /api/positions/{id}/hierarchy
+ */
+public function getPositionHierarchy(Request $request, $id)
+{
+    $position = Position::with(['positionLevel', 'organization'])
+        ->find($id);
+
+    if (!$position) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Position not found'
+        ], 404);
+    }
+
+    $organizationId = $position->OrganizationID;
+
+    // Get parent chain (upward)
+    $parents = $this->getPositionParentChain($position, $organizationId);
+
+    // Get children tree (downward)
+    $children = $this->buildPositionHierarchy($position, $organizationId, false);
+    $childrenArray = $children['Children'] ?? [];
+
+    // Get employees in this position
+    $employeesInPosition = EmployeePosition::with(['employee.user'])
+        ->where('PositionID', $position->PositionID)
+        ->active()
+        ->whereNull('EndDate')
+        ->get();
+
+    $employees = $employeesInPosition->map(function ($empPos) {
+        return [
+            'EmployeeID' => $empPos->employee->EmployeeID,
+            'FullName' => $empPos->employee->user->FullName ?? null,
+            'Email' => $empPos->employee->user->Email ?? null,
+            'StartDate' => $empPos->StartDate,
+        ];
+    });
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Position hierarchy retrieved successfully',
+        'data' => [
+            'Position' => [
+                'PositionID' => $position->PositionID,
+                'PositionName' => $position->PositionName,
+                'PositionLevel' => [
+                    'PositionLevelID' => $position->positionLevel->PositionLevelID ?? null,
+                    'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
+                ],
+                'LevelNo' => $position->LevelNo,
+                'IsActive' => $position->IsActive,
+                'RequirementQuantity' => $position->RequirementQuantity,
+            ],
+            'Employees' => $employees,
+            'EmployeeCount' => $employees->count(),
+            'Parents' => $parents,
+            'Children' => $childrenArray,
+            'OrganizationID' => $organizationId,
+            'OrganizationName' => $position->organization->OrganizationName ?? null,
+        ]
+    ], 200);
+}
+
+/**
+ * Get parent chain of a position
+ * Private helper method for getPositionHierarchy
+ */
+private function getPositionParentChain($position, $organizationId, &$visited = [])
+{
+    $parents = [];
+    
+    // Prevent infinite loop
+    if (in_array($position->PositionID, $visited)) {
+        return $parents;
+    }
+    
+    $visited[] = $position->PositionID;
+
+    // Check if has parent and parent is not itself
+    if ($position->ParentPositionID && $position->ParentPositionID != $position->PositionID) {
+        $parentPosition = Position::with(['positionLevel'])
+            ->where('PositionID', $position->ParentPositionID)
+            ->where('OrganizationID', $organizationId)
+            ->where('IsDelete', false)
+            ->first();
+
+        if ($parentPosition) {
+            $employeeCount = EmployeePosition::where('PositionID', $parentPosition->PositionID)
+                ->active()
+                ->whereNull('EndDate')
+                ->count();
+
+            $parents[] = [
+                'PositionID' => $parentPosition->PositionID,
+                'PositionName' => $parentPosition->PositionName,
+                'PositionLevel' => [
+                    'PositionLevelID' => $parentPosition->positionLevel->PositionLevelID ?? null,
+                    'PositionLevelName' => $parentPosition->positionLevel->PositionLevelName ?? null,
+                ],
+                'LevelNo' => $parentPosition->LevelNo,
+                'EmployeeCount' => $employeeCount,
+            ];
+
+            // Recursively get parent's parent
+            $upperParents = $this->getPositionParentChain($parentPosition, $organizationId, $visited);
+            $parents = array_merge($parents, $upperParents);
+        }
+    }
+
+    return $parents;
+}
 }
