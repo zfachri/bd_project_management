@@ -15,6 +15,7 @@ class User extends Authenticatable
     public $incrementing = false; // <-- nonaktifkan auto increment
 
     protected $fillable = [
+        'UserID',
         'AtTimeStamp',
         'ByUserID',
         'OperationCode',

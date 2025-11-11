@@ -27,6 +27,7 @@ class EmployeeController extends Controller
         $perPage = $request->input('per_page', 15);
         $search = $request->input('search');
         $organizationId = $request->input('OrganizationID');
+        // $positionId = $request->input('PositionID');
         $status = $request->input('status'); // active, resigned
 
         $query = Employee::with(['organization', 'user', 'currentPosition.position']);
@@ -39,6 +40,10 @@ class EmployeeController extends Controller
                 })
                     ->orWhere('EmployeeID', $search);
             });
+        }
+
+        if ($positionId) {
+            $query->where('PositionID', $positionId);
         }
 
         if ($organizationId) {
@@ -1320,308 +1325,615 @@ class EmployeeController extends Controller
     }
 
 
-/**
- * Get employee hierarchy (bosses and subordinates)
- * GET /api/employees/{id}/hierarchy
- */
-public function getHierarchy(Request $request, $id)
-{
-    $employee = Employee::with([
-        'currentPosition.position.organization',
-        'user'
-    ])->find($id);
+    /**
+     * Get employee hierarchy (bosses and subordinates)
+     * GET /api/employees/{id}/hierarchy
+     */
+    public function getHierarchy(Request $request, $id)
+    {
+        $employee = Employee::with([
+            'currentPosition.position.organization',
+            'user'
+        ])->find($id);
 
-    if (!$employee) {
+        if (!$employee) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Employee not found'
+            ], 404);
+        }
+
+        $currentPosition = $employee->currentPosition;
+
+        if (!$currentPosition || !$currentPosition->position) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Employee has no active position'
+            ], 404);
+        }
+
+        $position = $currentPosition->position;
+        $organizationId = $position->OrganizationID;
+
+        // Get boss chain (upward hierarchy)
+        $bosses = $this->getBossChain($position, $organizationId);
+
+        // Get subordinates (downward hierarchy)
+        $subordinates = $this->getSubordinates($position, $organizationId);
+
+        // Get current employee detail
+        $currentEmployee = [
+            'EmployeeID' => $employee->EmployeeID,
+            'FullName' => $employee->user->FullName ?? null,
+            'Email' => $employee->user->Email ?? null,
+            'Position' => [
+                'PositionID' => $position->PositionID,
+                'PositionName' => $position->PositionName,
+                'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
+                'LevelNo' => $position->LevelNo,
+            ],
+            'IsCurrent' => true,
+        ];
+
         return response()->json([
-            'success' => false,
-            'message' => 'Employee not found'
-        ], 404);
+            'success' => true,
+            'message' => 'Employee hierarchy retrieved successfully',
+            'data' => [
+                'Employee' => $currentEmployee,
+                'Bosses' => $bosses,
+                'Subordinates' => $subordinates,
+                'OrganizationID' => $organizationId,
+                'OrganizationName' => $position->organization->OrganizationName ?? null,
+            ]
+        ], 200);
     }
 
-    $currentPosition = $employee->currentPosition;
-    
-    if (!$currentPosition || !$currentPosition->position) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Employee has no active position'
-        ], 404);
-    }
+    /**
+     * Get boss chain recursively (upward)
+     */
+    private function getBossChain($position, $organizationId, &$visited = [])
+    {
+        $bosses = [];
 
-    $position = $currentPosition->position;
-    $organizationId = $position->OrganizationID;
+        // Prevent infinite loop
+        if (in_array($position->PositionID, $visited)) {
+            return $bosses;
+        }
 
-    // Get boss chain (upward hierarchy)
-    $bosses = $this->getBossChain($position, $organizationId);
+        $visited[] = $position->PositionID;
 
-    // Get subordinates (downward hierarchy)
-    $subordinates = $this->getSubordinates($position, $organizationId);
+        // Check if has parent and parent is not itself
+        if ($position->ParentPositionID && $position->ParentPositionID != $position->PositionID) {
+            $parentPosition = Position::with(['positionLevel', 'organization'])
+                ->where('PositionID', $position->ParentPositionID)
+                ->where('OrganizationID', $organizationId)
+                ->where('IsDelete', false)
+                ->first();
 
-    // Get current employee detail
-    $currentEmployee = [
-        'EmployeeID' => $employee->EmployeeID,
-        'FullName' => $employee->user->FullName ?? null,
-        'Email' => $employee->user->Email ?? null,
-        'Position' => [
-            'PositionID' => $position->PositionID,
-            'PositionName' => $position->PositionName,
-            'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
-            'LevelNo' => $position->LevelNo,
-        ],
-        'IsCurrent' => true,
-    ];
+            if ($parentPosition) {
+                // Get employee(s) in this parent position
+                $employeesInPosition = EmployeePosition::with(['employee.user'])
+                    ->where('PositionID', $parentPosition->PositionID)
+                    ->where('OrganizationID', $organizationId)
+                    ->active()
+                    ->whereNull('EndDate')
+                    ->get();
 
-    return response()->json([
-        'success' => true,
-        'message' => 'Employee hierarchy retrieved successfully',
-        'data' => [
-            'Employee' => $currentEmployee,
-            'Bosses' => $bosses,
-            'Subordinates' => $subordinates,
-            'OrganizationID' => $organizationId,
-            'OrganizationName' => $position->organization->OrganizationName ?? null,
-        ]
-    ], 200);
-}
+                $employees = $employeesInPosition->map(function ($empPos) use ($parentPosition) {
+                    return [
+                        'EmployeeID' => $empPos->employee->EmployeeID,
+                        'FullName' => $empPos->employee->user->FullName ?? null,
+                        'Email' => $empPos->employee->user->Email ?? null,
+                        'Position' => [
+                            'PositionID' => $parentPosition->PositionID,
+                            'PositionName' => $parentPosition->PositionName,
+                            'PositionLevelName' => $parentPosition->positionLevel->PositionLevelName ?? null,
+                            'LevelNo' => $parentPosition->LevelNo,
+                        ],
+                        'IsBoss' => true,
+                    ];
+                })->toArray();
 
-/**
- * Get boss chain recursively (upward)
- */
-private function getBossChain($position, $organizationId, &$visited = [])
-{
-    $bosses = [];
-    
-    // Prevent infinite loop
-    if (in_array($position->PositionID, $visited)) {
+                if (count($employees) > 0) {
+                    $bosses[] = [
+                        'Position' => [
+                            'PositionID' => $parentPosition->PositionID,
+                            'PositionName' => $parentPosition->PositionName,
+                            'PositionLevelName' => $parentPosition->positionLevel->PositionLevelName ?? null,
+                            'LevelNo' => $parentPosition->LevelNo,
+                        ],
+                        'Employees' => $employees,
+                    ];
+
+                    // Recursively get parent's boss
+                    $upperBosses = $this->getBossChain($parentPosition, $organizationId, $visited);
+                    $bosses = array_merge($bosses, $upperBosses);
+                }
+            }
+        }
+
         return $bosses;
     }
-    
-    $visited[] = $position->PositionID;
 
-    // Check if has parent and parent is not itself
-    if ($position->ParentPositionID && $position->ParentPositionID != $position->PositionID) {
-        $parentPosition = Position::with(['positionLevel', 'organization'])
-            ->where('PositionID', $position->ParentPositionID)
+    /**
+     * Get subordinates recursively (downward)
+     */
+    private function getSubordinates($position, $organizationId, &$visited = [])
+    {
+        $subordinates = [];
+
+        // Prevent infinite loop
+        if (in_array($position->PositionID, $visited)) {
+            return $subordinates;
+        }
+
+        $visited[] = $position->PositionID;
+
+        // Get all child positions
+        $childPositions = Position::with(['positionLevel'])
+            ->where('ParentPositionID', $position->PositionID)
+            ->where('PositionID', '!=', $position->PositionID) // Exclude self-reference
             ->where('OrganizationID', $organizationId)
             ->where('IsDelete', false)
-            ->first();
+            ->get();
 
-        if ($parentPosition) {
-            // Get employee(s) in this parent position
+        foreach ($childPositions as $childPosition) {
+            // Get employees in this child position
             $employeesInPosition = EmployeePosition::with(['employee.user'])
-                ->where('PositionID', $parentPosition->PositionID)
+                ->where('PositionID', $childPosition->PositionID)
                 ->where('OrganizationID', $organizationId)
                 ->active()
                 ->whereNull('EndDate')
                 ->get();
 
-            $employees = $employeesInPosition->map(function ($empPos) use ($parentPosition) {
+            $employees = $employeesInPosition->map(function ($empPos) use ($childPosition) {
                 return [
                     'EmployeeID' => $empPos->employee->EmployeeID,
                     'FullName' => $empPos->employee->user->FullName ?? null,
                     'Email' => $empPos->employee->user->Email ?? null,
                     'Position' => [
-                        'PositionID' => $parentPosition->PositionID,
-                        'PositionName' => $parentPosition->PositionName,
-                        'PositionLevelName' => $parentPosition->positionLevel->PositionLevelName ?? null,
-                        'LevelNo' => $parentPosition->LevelNo,
+                        'PositionID' => $childPosition->PositionID,
+                        'PositionName' => $childPosition->PositionName,
+                        'PositionLevelName' => $childPosition->positionLevel->PositionLevelName ?? null,
+                        'LevelNo' => $childPosition->LevelNo,
                     ],
-                    'IsBoss' => true,
+                    'IsSubordinate' => true,
                 ];
             })->toArray();
 
             if (count($employees) > 0) {
-                $bosses[] = [
+                $subordinates[] = [
                     'Position' => [
-                        'PositionID' => $parentPosition->PositionID,
-                        'PositionName' => $parentPosition->PositionName,
-                        'PositionLevelName' => $parentPosition->positionLevel->PositionLevelName ?? null,
-                        'LevelNo' => $parentPosition->LevelNo,
+                        'PositionID' => $childPosition->PositionID,
+                        'PositionName' => $childPosition->PositionName,
+                        'PositionLevelName' => $childPosition->positionLevel->PositionLevelName ?? null,
+                        'LevelNo' => $childPosition->LevelNo,
                     ],
                     'Employees' => $employees,
                 ];
-
-                // Recursively get parent's boss
-                $upperBosses = $this->getBossChain($parentPosition, $organizationId, $visited);
-                $bosses = array_merge($bosses, $upperBosses);
             }
+
+            // Recursively get subordinates of this child position
+            $deeperSubordinates = $this->getSubordinates($childPosition, $organizationId, $visited);
+            $subordinates = array_merge($subordinates, $deeperSubordinates);
         }
-    }
 
-    return $bosses;
-}
-
-/**
- * Get subordinates recursively (downward)
- */
-private function getSubordinates($position, $organizationId, &$visited = [])
-{
-    $subordinates = [];
-    
-    // Prevent infinite loop
-    if (in_array($position->PositionID, $visited)) {
         return $subordinates;
     }
-    
-    $visited[] = $position->PositionID;
 
-    // Get all child positions
-    $childPositions = Position::with(['positionLevel'])
-        ->where('ParentPositionID', $position->PositionID)
-        ->where('PositionID', '!=', $position->PositionID) // Exclude self-reference
-        ->where('OrganizationID', $organizationId)
-        ->where('IsDelete', false)
-        ->get();
+    /**
+     * Get organization hierarchy tree
+     * GET /api/employees/hierarchy/tree?OrganizationID={id}
+     */
+    public function getOrganizationHierarchyTree(Request $request)
+    {
+        $organizationId = $request->input('OrganizationID');
 
-    foreach ($childPositions as $childPosition) {
-        // Get employees in this child position
+        if (!$organizationId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'OrganizationID is required'
+            ], 422);
+        }
+
+        $organization = Organization::find($organizationId);
+
+        if (!$organization) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Organization not found'
+            ], 404);
+        }
+
+        // Get root positions (positions where ParentPositionID equals PositionID)
+        $rootPositions = Position::with(['positionLevel'])
+            ->where('OrganizationID', $organizationId)
+            ->whereColumn('ParentPositionID', 'PositionID')
+            ->where('IsDelete', false)
+            ->where('IsActive', true)
+            ->get();
+
+        $tree = [];
+
+        foreach ($rootPositions as $rootPosition) {
+            $tree[] = $this->buildPositionTree($rootPosition, $organizationId);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Organization hierarchy tree retrieved successfully',
+            'data' => [
+                'OrganizationID' => $organizationId,
+                'OrganizationName' => $organization->OrganizationName,
+                'Tree' => $tree,
+            ]
+        ], 200);
+    }
+
+    /**
+     * Build position tree recursively
+     */
+    private function buildPositionTree($position, $organizationId, &$visited = [])
+    {
+        // Prevent infinite loop
+        if (in_array($position->PositionID, $visited)) {
+            return null;
+        }
+
+        $visited[] = $position->PositionID;
+
+        // Get employees in this position
         $employeesInPosition = EmployeePosition::with(['employee.user'])
-            ->where('PositionID', $childPosition->PositionID)
+            ->where('PositionID', $position->PositionID)
             ->where('OrganizationID', $organizationId)
             ->active()
             ->whereNull('EndDate')
             ->get();
 
-        $employees = $employeesInPosition->map(function ($empPos) use ($childPosition) {
+        $employees = $employeesInPosition->map(function ($empPos) {
             return [
                 'EmployeeID' => $empPos->employee->EmployeeID,
                 'FullName' => $empPos->employee->user->FullName ?? null,
                 'Email' => $empPos->employee->user->Email ?? null,
-                'Position' => [
-                    'PositionID' => $childPosition->PositionID,
-                    'PositionName' => $childPosition->PositionName,
-                    'PositionLevelName' => $childPosition->positionLevel->PositionLevelName ?? null,
-                    'LevelNo' => $childPosition->LevelNo,
-                ],
-                'IsSubordinate' => true,
+                'StartDate' => $empPos->StartDate,
             ];
         })->toArray();
 
-        if (count($employees) > 0) {
-            $subordinates[] = [
+        // Get child positions
+        $childPositions = Position::with(['positionLevel'])
+            ->where('ParentPositionID', $position->PositionID)
+            ->where('PositionID', '!=', $position->PositionID)
+            ->where('OrganizationID', $organizationId)
+            ->where('IsDelete', false)
+            ->where('IsActive', true)
+            ->get();
+
+        $children = [];
+        foreach ($childPositions as $childPosition) {
+            $childNode = $this->buildPositionTree($childPosition, $organizationId, $visited);
+            if ($childNode) {
+                $children[] = $childNode;
+            }
+        }
+
+        return [
+            'Position' => [
+                'PositionID' => $position->PositionID,
+                'PositionName' => $position->PositionName,
+                'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
+                'LevelNo' => $position->LevelNo,
+            ],
+            'Employees' => $employees,
+            'EmployeeCount' => count($employees),
+            'Children' => $children,
+            'ChildrenCount' => count($children),
+        ];
+    }
+    /**
+     * Get employees by position with hierarchy context
+     * GET /api/positions/{positionId}/employees
+     */
+    public function getEmployeesByPosition(Request $request, $positionId)
+    {
+        $position = Position::with(['positionLevel', 'organization'])
+            ->find($positionId);
+
+        if (!$position) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Position not found'
+            ], 404);
+        }
+
+        // Get employees in this position
+        $employeePositions = EmployeePosition::with(['employee.user'])
+            ->where('PositionID', $positionId)
+            ->where('OrganizationID', $position->OrganizationID)
+            ->active()
+            ->whereNull('EndDate')
+            ->get();
+
+        $employees = $employeePositions->map(function ($empPos) {
+            return [
+                'EmployeeID' => $empPos->employee->EmployeeID,
+                'FullName' => $empPos->employee->user->FullName ?? null,
+                'Email' => $empPos->employee->user->Email ?? null,
+                'GenderCode' => $empPos->employee->GenderCode,
+                'DateOfBirth' => $empPos->employee->DateOfBirth,
+                'JoinDate' => $empPos->employee->JoinDate,
+                'PositionStartDate' => $empPos->StartDate,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Employees retrieved successfully',
+            'data' => [
+                'Position' => [
+                    'PositionID' => $position->PositionID,
+                    'PositionName' => $position->PositionName,
+                    'PositionLevel' => [
+                        'PositionLevelID' => $position->positionLevel->PositionLevelID ?? null,
+                        'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
+                    ],
+                    'LevelNo' => $position->LevelNo,
+                    'RequirementQuantity' => $position->RequirementQuantity,
+                ],
+                'OrganizationID' => $position->OrganizationID,
+                'OrganizationName' => $position->organization->OrganizationName ?? null,
+                'Employees' => $employees,
+                'EmployeeCount' => $employees->count(),
+            ]
+        ], 200);
+    }
+
+    /**
+     * Get position hierarchy with all employees at each level
+     * GET /api/positions/{positionId}/hierarchy/employees
+     */
+    public function getPositionHierarchyWithEmployees(Request $request, $positionId)
+    {
+        $position = Position::with(['positionLevel', 'organization'])
+            ->find($positionId);
+
+        if (!$position) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Position not found'
+            ], 404);
+        }
+
+        $organizationId = $position->OrganizationID;
+
+        // Get parent chain with employees
+        $parents = $this->getPositionParentChainWithEmployees($position, $organizationId);
+
+        // Get current position employees
+        $currentEmployees = $this->getEmployeesInPosition($position->PositionID, $organizationId);
+
+        // Get children positions with employees (recursive)
+        $children = $this->getPositionChildrenWithEmployees($position, $organizationId);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Position hierarchy with employees retrieved successfully',
+            'data' => [
+                'Position' => [
+                    'PositionID' => $position->PositionID,
+                    'PositionName' => $position->PositionName,
+                    'PositionLevel' => [
+                        'PositionLevelID' => $position->positionLevel->PositionLevelID ?? null,
+                        'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
+                    ],
+                    'LevelNo' => $position->LevelNo,
+                    'RequirementQuantity' => $position->RequirementQuantity,
+                ],
+                'Employees' => $currentEmployees,
+                'EmployeeCount' => count($currentEmployees),
+                'Parents' => $parents,
+                'Children' => $children,
+                'OrganizationID' => $organizationId,
+                'OrganizationName' => $position->organization->OrganizationName ?? null,
+            ]
+        ], 200);
+    }
+
+    /**
+     * Get all employees in organization grouped by position hierarchy
+     * GET /api/organizations/{organizationId}/employees/by-position
+     */
+    public function getEmployeesByPositionHierarchy(Request $request, $organizationId)
+    {
+        $organization = Organization::find($organizationId);
+
+        if (!$organization) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Organization not found'
+            ], 404);
+        }
+
+        // Get root positions
+        $rootPositions = Position::with(['positionLevel'])
+            ->where('OrganizationID', $organizationId)
+            ->whereColumn('ParentPositionID', 'PositionID')
+            ->where('IsDelete', false)
+            ->where('IsActive', true)
+            ->get();
+
+        $tree = [];
+        foreach ($rootPositions as $rootPosition) {
+            $tree[] = $this->buildPositionTreeWithEmployees($rootPosition, $organizationId);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Employees by position hierarchy retrieved successfully',
+            'data' => [
+                'OrganizationID' => $organizationId,
+                'OrganizationName' => $organization->OrganizationName,
+                'PositionTree' => $tree,
+            ]
+        ], 200);
+    }
+
+    /**
+     * Helper: Get employees in a specific position
+     */
+    private function getEmployeesInPosition($positionId, $organizationId)
+    {
+        $employeePositions = EmployeePosition::with(['employee.user'])
+            ->where('PositionID', $positionId)
+            ->where('OrganizationID', $organizationId)
+            ->active()
+            ->whereNull('EndDate')
+            ->get();
+
+        return $employeePositions->map(function ($empPos) {
+            return [
+                'EmployeeID' => $empPos->employee->EmployeeID,
+                'FullName' => $empPos->employee->user->FullName ?? null,
+                'Email' => $empPos->employee->user->Email ?? null,
+                'GenderCode' => $empPos->employee->GenderCode,
+                'JoinDate' => $empPos->employee->JoinDate,
+                'PositionStartDate' => $empPos->StartDate,
+            ];
+        })->toArray();
+    }
+
+    /**
+     * Helper: Get parent chain with employees
+     */
+    private function getPositionParentChainWithEmployees($position, $organizationId, &$visited = [])
+    {
+        $parents = [];
+
+        if (in_array($position->PositionID, $visited)) {
+            return $parents;
+        }
+
+        $visited[] = $position->PositionID;
+
+        if ($position->ParentPositionID && $position->ParentPositionID != $position->PositionID) {
+            $parentPosition = Position::with(['positionLevel'])
+                ->where('PositionID', $position->ParentPositionID)
+                ->where('OrganizationID', $organizationId)
+                ->where('IsDelete', false)
+                ->first();
+
+            if ($parentPosition) {
+                $employees = $this->getEmployeesInPosition($parentPosition->PositionID, $organizationId);
+
+                $parents[] = [
+                    'Position' => [
+                        'PositionID' => $parentPosition->PositionID,
+                        'PositionName' => $parentPosition->PositionName,
+                        'PositionLevel' => [
+                            'PositionLevelID' => $parentPosition->positionLevel->PositionLevelID ?? null,
+                            'PositionLevelName' => $parentPosition->positionLevel->PositionLevelName ?? null,
+                        ],
+                        'LevelNo' => $parentPosition->LevelNo,
+                    ],
+                    'Employees' => $employees,
+                    'EmployeeCount' => count($employees),
+                ];
+
+                $upperParents = $this->getPositionParentChainWithEmployees($parentPosition, $organizationId, $visited);
+                $parents = array_merge($parents, $upperParents);
+            }
+        }
+
+        return $parents;
+    }
+
+    /**
+     * Helper: Get children positions with employees (recursive)
+     */
+    private function getPositionChildrenWithEmployees($position, $organizationId, &$visited = [])
+    {
+        $children = [];
+
+        if (in_array($position->PositionID, $visited)) {
+            return $children;
+        }
+
+        $visited[] = $position->PositionID;
+
+        $childPositions = Position::with(['positionLevel'])
+            ->where('ParentPositionID', $position->PositionID)
+            ->where('PositionID', '!=', $position->PositionID)
+            ->where('OrganizationID', $organizationId)
+            ->where('IsDelete', false)
+            ->where('IsActive', true)
+            ->get();
+
+        foreach ($childPositions as $childPosition) {
+            $employees = $this->getEmployeesInPosition($childPosition->PositionID, $organizationId);
+
+            $childData = [
                 'Position' => [
                     'PositionID' => $childPosition->PositionID,
                     'PositionName' => $childPosition->PositionName,
-                    'PositionLevelName' => $childPosition->positionLevel->PositionLevelName ?? null,
+                    'PositionLevel' => [
+                        'PositionLevelID' => $childPosition->positionLevel->PositionLevelID ?? null,
+                        'PositionLevelName' => $childPosition->positionLevel->PositionLevelName ?? null,
+                    ],
                     'LevelNo' => $childPosition->LevelNo,
                 ],
                 'Employees' => $employees,
+                'EmployeeCount' => count($employees),
+                'Children' => $this->getPositionChildrenWithEmployees($childPosition, $organizationId, $visited),
             ];
+
+            $children[] = $childData;
         }
 
-        // Recursively get subordinates of this child position
-        $deeperSubordinates = $this->getSubordinates($childPosition, $organizationId, $visited);
-        $subordinates = array_merge($subordinates, $deeperSubordinates);
+        return $children;
     }
 
-    return $subordinates;
-}
+    /**
+     * Helper: Build position tree with employees (recursive)
+     */
+    private function buildPositionTreeWithEmployees($position, $organizationId, &$visited = [])
+    {
+        if (in_array($position->PositionID, $visited)) {
+            return null;
+        }
 
-/**
- * Get organization hierarchy tree
- * GET /api/employees/hierarchy/tree?OrganizationID={id}
- */
-public function getOrganizationHierarchyTree(Request $request)
-{
-    $organizationId = $request->input('OrganizationID');
+        $visited[] = $position->PositionID;
 
-    if (!$organizationId) {
-        return response()->json([
-            'success' => false,
-            'message' => 'OrganizationID is required'
-        ], 422);
-    }
+        $employees = $this->getEmployeesInPosition($position->PositionID, $organizationId);
 
-    $organization = Organization::find($organizationId);
+        $childPositions = Position::with(['positionLevel'])
+            ->where('ParentPositionID', $position->PositionID)
+            ->where('PositionID', '!=', $position->PositionID)
+            ->where('OrganizationID', $organizationId)
+            ->where('IsDelete', false)
+            ->where('IsActive', true)
+            ->get();
 
-    if (!$organization) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Organization not found'
-        ], 404);
-    }
+        $children = [];
+        foreach ($childPositions as $childPosition) {
+            $childNode = $this->buildPositionTreeWithEmployees($childPosition, $organizationId, $visited);
+            if ($childNode) {
+                $children[] = $childNode;
+            }
+        }
 
-    // Get root positions (positions where ParentPositionID equals PositionID)
-    $rootPositions = Position::with(['positionLevel'])
-        ->where('OrganizationID', $organizationId)
-        ->whereColumn('ParentPositionID', 'PositionID')
-        ->where('IsDelete', false)
-        ->where('IsActive', true)
-        ->get();
-
-    $tree = [];
-
-    foreach ($rootPositions as $rootPosition) {
-        $tree[] = $this->buildPositionTree($rootPosition, $organizationId);
-    }
-
-    return response()->json([
-        'success' => true,
-        'message' => 'Organization hierarchy tree retrieved successfully',
-        'data' => [
-            'OrganizationID' => $organizationId,
-            'OrganizationName' => $organization->OrganizationName,
-            'Tree' => $tree,
-        ]
-    ], 200);
-}
-
-/**
- * Build position tree recursively
- */
-private function buildPositionTree($position, $organizationId, &$visited = [])
-{
-    // Prevent infinite loop
-    if (in_array($position->PositionID, $visited)) {
-        return null;
-    }
-    
-    $visited[] = $position->PositionID;
-
-    // Get employees in this position
-    $employeesInPosition = EmployeePosition::with(['employee.user'])
-        ->where('PositionID', $position->PositionID)
-        ->where('OrganizationID', $organizationId)
-        ->active()
-        ->whereNull('EndDate')
-        ->get();
-
-    $employees = $employeesInPosition->map(function ($empPos) {
         return [
-            'EmployeeID' => $empPos->employee->EmployeeID,
-            'FullName' => $empPos->employee->user->FullName ?? null,
-            'Email' => $empPos->employee->user->Email ?? null,
-            'StartDate' => $empPos->StartDate,
+            'Position' => [
+                'PositionID' => $position->PositionID,
+                'PositionName' => $position->PositionName,
+                'PositionLevel' => [
+                    'PositionLevelID' => $position->positionLevel->PositionLevelID ?? null,
+                    'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
+                ],
+                'LevelNo' => $position->LevelNo,
+                'RequirementQuantity' => $position->RequirementQuantity,
+            ],
+            'Employees' => $employees,
+            'EmployeeCount' => count($employees),
+            'Children' => $children,
         ];
-    })->toArray();
-
-    // Get child positions
-    $childPositions = Position::with(['positionLevel'])
-        ->where('ParentPositionID', $position->PositionID)
-        ->where('PositionID', '!=', $position->PositionID)
-        ->where('OrganizationID', $organizationId)
-        ->where('IsDelete', false)
-        ->where('IsActive', true)
-        ->get();
-
-    $children = [];
-    foreach ($childPositions as $childPosition) {
-        $childNode = $this->buildPositionTree($childPosition, $organizationId, $visited);
-        if ($childNode) {
-            $children[] = $childNode;
-        }
     }
-
-    return [
-        'Position' => [
-            'PositionID' => $position->PositionID,
-            'PositionName' => $position->PositionName,
-            'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,
-            'LevelNo' => $position->LevelNo,
-        ],
-        'Employees' => $employees,
-        'EmployeeCount' => count($employees),
-        'Children' => $children,
-        'ChildrenCount' => count($children),
-    ];
-}
 }
