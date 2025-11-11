@@ -42,9 +42,9 @@ class EmployeeController extends Controller
             });
         }
 
-        if ($positionId) {
-            $query->where('PositionID', $positionId);
-        }
+        // if ($positionId) {
+        //     $query->where('PositionID', $positionId);
+        // }
 
         if ($organizationId) {
             $query->where('OrganizationID', $organizationId);
@@ -1296,7 +1296,7 @@ class EmployeeController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Employee created successfully',
+                'message' => 'Employee deleted successfully',
                 'data' => [
                     'EmployeeID' => $employee->EmployeeID,
                     'UserID' => $user->UserID,

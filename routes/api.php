@@ -79,6 +79,10 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::put('/{id}', [PositionController::class, 'update']);
         // Route::delete('/{id}', [PositionController::class, 'destroy']);
         Route::patch('/{id}/toggle-active', [PositionController::class, 'toggleActive']);
+
+        // Employee hierarchy based on position
+        Route::get('/{positionId}/employees', [EmployeeController::class, 'getEmployeesByPosition']);
+        Route::get('/{positionId}/hierarchy/employees', [EmployeeController::class, 'getPositionHierarchyWithEmployees']);
     });
 
     // Employee Management (with Position)
