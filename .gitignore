@@ -33,3 +33,5 @@ private.pem
 public.pem
 private_*.txt
 public_*.txt
+
+composer.lock

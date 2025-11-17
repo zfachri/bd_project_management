@@ -276,7 +276,7 @@ class PositionController extends Controller
             ]);
 
             if(!$position->ParentPositionID) {
-                $position->ParentOrganizationID = $position->PositionID;
+                $position->ParentPositionID = $position->PositionID;
                 $position->save();
             }
 

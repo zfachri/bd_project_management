@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\PositionController;
 use App\Http\Controllers\Api\PositionLevelController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\EmployeeController;
+use App\Http\Controllers\Api\FileUploadController;
 
 /*
 |--------------------------------------------------------------------------
@@ -52,7 +53,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::get('/', [OrganizationController::class, 'index']);
         Route::get('/all', [OrganizationController::class, 'all']);
         Route::get('/level/{level}', [OrganizationController::class, 'getByLevel']);
-                // Get full hierarchy tree
+        // Get full hierarchy tree
         Route::get('/hierarchy', [OrganizationController::class, 'getHierarchy']);
 
         // Get hierarchy from specific organization
@@ -102,5 +103,31 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::post('/{id}/positions', [EmployeeController::class, 'addPosition']);
         Route::put('/{id}/positions/{positionId}', [EmployeeController::class, 'updatePosition']);
         Route::delete('/{id}/positions/{positionId}', [EmployeeController::class, 'removePosition']);
+    });
+
+    Route::prefix('documents')->group(function () {
+        // Generate presigned URL for single file upload
+        Route::post('/upload-url', [FileUploadController::class, 'generateUploadUrl']);
+
+        // Generate presigned URLs for batch upload (max 5 files)
+        Route::post('/batch-upload-url', [FileUploadController::class, 'generateBatchUploadUrl']);
+
+        // Generate presigned URL for download/view (with force_download parameter)
+        Route::post('/download-url', [FileUploadController::class, 'generateDownloadUrl']);
+
+        // Generate presigned URL for viewing inline (shorthand)
+        Route::post('/view-url', [FileUploadController::class, 'generateViewUrl']);
+
+        // Get documents by module
+        Route::post('/list', [FileUploadController::class, 'getDocumentsByModule']);
+
+        // Update document information
+        Route::put('/update', [FileUploadController::class, 'updateDocument']);
+
+        // Soft delete document
+        Route::delete('/delete', [FileUploadController::class, 'deleteDocument']);
+
+        // Get allowed file types and size limits
+        Route::get('/config', [FileUploadController::class, 'getAllowedFileTypes']);
     });
 });
