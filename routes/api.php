@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DocumentManagementController;
 use App\Http\Controllers\Api\OrganizationController;
 use App\Http\Controllers\Api\PositionController;
 use App\Http\Controllers\Api\PositionLevelController;
@@ -129,5 +130,24 @@ Route::middleware(['jwt.auth'])->group(function () {
 
         // Get allowed file types and size limits
         Route::get('/config', [FileUploadController::class, 'getAllowedFileTypes']);
+    });
+
+    Route::prefix('document-management')->group(function () {
+        Route::post('/create', [DocumentManagementController::class, 'createDocument']);
+
+        // Update document - create new version (current + 1)
+        Route::post('/{documentId}/upload-version', [DocumentManagementController::class, 'updateDocument']);
+
+        // Get document details with all versions
+        Route::get('/{documentId}', [DocumentManagementController::class, 'getDocument']);
+
+        // Get document version URL (view/download)
+        Route::post('/version-url', [DocumentManagementController::class, 'getVersionUrl']);
+
+        // List documents by organization
+        Route::post('/list', [DocumentManagementController::class, 'listByOrganization']);
+
+        // Update document metadata (not file)
+        Route::put('/{documentId}/info', [DocumentManagementController::class, 'updateDocumentInfo']);
     });
 });
