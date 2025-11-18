@@ -9,7 +9,7 @@ class DocumentRevision extends Model
 {
     protected $table = 'DocumentRevision';
     protected $primaryKey = 'DocumentRevisionID';
-    public $incrementing = true;
+    public $incrementing = false;
     public $timestamps = false;
 
     protected $fillable = [

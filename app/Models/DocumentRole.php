@@ -9,7 +9,7 @@ class DocumentRole extends Model
 {
     protected $table = 'DocumentRole';
     protected $primaryKey = 'DocumentRoleID';
-    public $incrementing = true;
+    public $incrementing = false;
     public $timestamps = false;
 
     protected $fillable = [

@@ -10,7 +10,7 @@ class DocumentManagement extends Model
 {
     protected $table = 'DocumentManagement';
     protected $primaryKey = 'DocumentManagementID';
-    public $incrementing = true;
+    public $incrementing = false;
     public $timestamps = false;
 
     protected $fillable = [

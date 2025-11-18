@@ -75,6 +75,7 @@ class DocumentManagementController extends Controller
 
             // Create DocumentManagement
             $document = DocumentManagement::create([
+                'DocumentManagementID' => Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -105,6 +106,7 @@ class DocumentManagementController extends Controller
 
             // Insert DocumentRole for owner organization (OrganizationID from DocumentManagement)
             DocumentRole::create([
+                'DocumentRoleID' => Carbon::now()->timestamp.random_numbersu(5),
                 'DocumentManagementID' => $document->DocumentManagementID,
                 'OrganizationID' => $document->OrganizationID,
                 'IsDownload' => $request->input('is_download', true),
@@ -121,6 +123,7 @@ class DocumentManagementController extends Controller
                     // Skip if same as owner organization (already inserted)
                     if ($orgId != $document->OrganizationID) {
                         DocumentRole::create([
+                            'DocumentRoleID' => Carbon::now()->timestamp.random_numbersu(5),
                             'DocumentManagementID' => $document->DocumentManagementID,
                             'OrganizationID' => $orgId,
                             'IsDownload' => $isDownload,
@@ -134,6 +137,7 @@ class DocumentManagementController extends Controller
             if ($documentType === 'RACI' && $request->has('raci_activities')) {
                 foreach ($request->input('raci_activities') as $raciData) {
                     RaciActivity::create([
+                        'RaciActivityID' => Carbon::now()->timestamp.random_numbersu(5),
                         'DocumentManagementID' => $document->DocumentManagementID,
                         'Activity' => $raciData['activity'],
                         'PIC' => $raciData['pic'], // PIC is PositionID
@@ -151,6 +155,7 @@ class DocumentManagementController extends Controller
                 'ReferenceTable' => 'DocumentManagement',
                 'ReferenceRecordID' => $document->DocumentManagementID,
                 'Data' => json_encode([
+                    'DocumentManagementID' => $document->DocumentManagementID,
                     'DocumentName' => $document->DocumentName,
                     'DocumentType' => $document->DocumentType,
                     'OrganizationID' => $document->OrganizationID,

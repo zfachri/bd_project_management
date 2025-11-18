@@ -9,7 +9,7 @@ class DocumentSubmission extends Model
 {
     protected $table = 'DocumentSubmission';
     protected $primaryKey = 'DocumentSubmission';
-    public $incrementing = true;
+    public $incrementing = false;
     public $timestamps = false;
 
     protected $fillable = [
