@@ -13,6 +13,7 @@ class DocumentSubmission extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'DocumentSubmission',
         'ByUserID',
         'OrganizationID',
         'Comment',

@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::create('DocumentRevision', function (Blueprint $table) {
-            $table->increments('DocumentRevisionID');
+            $table->unsignedBigInteger('DocumentRevisionID')->primary();
             $table->unsignedBigInteger('DocumentManagementID');
             $table->unsignedBigInteger('ByUserID')->nullable();
             $table->text('Comment')->nullable();

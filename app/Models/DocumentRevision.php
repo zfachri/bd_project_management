@@ -13,6 +13,7 @@ class DocumentRevision extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'DocumentRevisionID',
         'DocumentManagementID',
         'ByUserID',
         'Comment',

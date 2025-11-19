@@ -13,6 +13,7 @@ class DocumentRole extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'DocumentRoleID',
         'DocumentManagementID',
         'OrganizationID',
         'IsDownload',

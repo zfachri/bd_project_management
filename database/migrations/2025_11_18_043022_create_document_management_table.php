@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('DocumentManagement', function (Blueprint $table) {
-            $table->bigIncrements('DocumentManagementID');
+            $table->unsignedBigInteger('DocumentManagementID')->primary();
             $table->bigInteger('AtTimeStamp');
             $table->bigInteger('ByUserID');
             $table->char('OperationCode', 1)->default('I');

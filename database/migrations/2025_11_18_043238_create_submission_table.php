@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::create('DocumentSubmission', function (Blueprint $table) {
-            $table->bigIncrements('DocumentSubmission');
+            $table->unsignedBigInteger('DocumentSubmission')->primary();
             $table->unsignedBigInteger('ByUserID');
             $table->unsignedBigInteger('OrganizationID');
             $table->text('Comment')->nullable();

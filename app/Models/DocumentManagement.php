@@ -14,6 +14,7 @@ class DocumentManagement extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'DocumentManagementID',
         'AtTimeStamp',
         'ByUserID',
         'OperationCode',

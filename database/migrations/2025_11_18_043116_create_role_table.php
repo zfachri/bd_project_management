@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::create('DocumentRole', function (Blueprint $table) {
-            $table->increments('DocumentRoleID');
+            $table->unsignedBigInteger('DocumentRoleID')->primary();
             $table->unsignedBigInteger('DocumentManagementID');
             $table->unsignedBigInteger('OrganizationID');
             $table->boolean('IsDownload')->default(false);
