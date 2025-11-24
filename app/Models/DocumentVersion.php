@@ -18,6 +18,7 @@ class DocumentVersion extends Model
         'DocumentManagementID',
         'VersionNo',
         'DocumentPath',
+        'DocumentUrl',
         'AtTimeStamp',
     ];
 

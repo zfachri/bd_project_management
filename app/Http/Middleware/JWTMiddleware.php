@@ -53,6 +53,7 @@ class JWTMiddleware
             }
 
             // Add user to request
+            unset($user->password);
             $request->merge(['auth_user' => $user]);
             $request->merge(['auth_user_id' => $user->UserID]);
 

@@ -121,8 +121,8 @@ class MinioService
         $extension = pathinfo($filename, PATHINFO_EXTENSION);
         
         $finalFilename = $extension 
-            ? "{$id}_{$snakeFilename}.{$extension}" 
-            : "{$id}_{$snakeFilename}";
+            ? "{$snakeFilename}_{$id}.{$extension}" 
+            : "{$snakeFilename}_{$id}";
         
         $path = "{$moduleName}/{$moduleNameId}/{$finalFilename}";
         
