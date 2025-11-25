@@ -3,6 +3,8 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DocumentManagementController;
+use App\Http\Controllers\Api\DocumentRevisionController;
+use App\Http\Controllers\Api\DocumentSubmissionController;
 use App\Http\Controllers\Api\OrganizationController;
 use App\Http\Controllers\Api\PositionController;
 use App\Http\Controllers\Api\PositionLevelController;
@@ -149,5 +151,65 @@ Route::middleware(['jwt.auth'])->group(function () {
 
         // Update document metadata (not file)
         Route::put('/{documentId}/info', [DocumentManagementController::class, 'updateDocumentInfo']);
+
+        Route::get('/document/view/{documentId}', [DocumentManagementController::class, 'viewDocument']);
+    });
+
+    Route::prefix('document-submission')->group(function () {
+        // User request submission
+        Route::post('/request', [DocumentSubmissionController::class, 'requestSubmission']);
+
+        // Get user's own submissions
+        Route::get('/my-submissions', [DocumentSubmissionController::class, 'getMySubmissions']);
+
+        // Get single submission detail
+        Route::get('/{submissionId}', [DocumentSubmissionController::class, 'getSubmission']);
+
+        // Admin: Get all submissions (with filters)
+        Route::post('/list', [DocumentSubmissionController::class, 'listSubmissions']);
+
+        // Admin: Get pending submissions
+        Route::get('/pending/list', [DocumentSubmissionController::class, 'getPendingSubmissions']);
+
+        // Admin: Approve submission
+        Route::put('/{submissionId}/approve', [DocumentSubmissionController::class, 'approveSubmission']);
+
+        // Admin: Decline submission
+        Route::put('/{submissionId}/decline', [DocumentSubmissionController::class, 'declineSubmission']);
+
+        // Get submission statistics
+        Route::get('/stats/summary', [DocumentSubmissionController::class, 'getSubmissionStats']);
+    });
+
+    Route::prefix('document-revision')->group(function () {
+        // Get revisions for a specific document
+        Route::get('/document/{documentManagementId}', [DocumentRevisionController::class, 'getDocumentRevisions']);
+
+        // User request revision
+        Route::post('/document/{documentManagementId}/request', [DocumentRevisionController::class, 'requestRevision']);
+
+        // Get user's own revision requests
+        Route::get('/my-revisions', [DocumentRevisionController::class, 'getMyRevisions']);
+
+        // Get single revision detail
+        Route::get('/{revisionId}', [DocumentRevisionController::class, 'getRevision']);
+
+        // Admin: Get all revisions (with filters)
+        Route::post('/list', [DocumentRevisionController::class, 'listRevisions']);
+
+        // Admin: Get pending revisions
+        Route::get('/pending/list', [DocumentRevisionController::class, 'getPendingRevisions']);
+
+        // Admin: Get approved revisions ready for version update
+        Route::get('/approved/list', [DocumentRevisionController::class, 'getApprovedRevisions']);
+
+        // Admin: Approve revision
+        Route::put('/{revisionId}/approve', [DocumentRevisionController::class, 'approveRevision']);
+
+        // Admin: Decline revision
+        Route::put('/{revisionId}/decline', [DocumentRevisionController::class, 'declineRevision']);
+
+        // Get revision statistics
+        Route::get('/stats/summary', [DocumentRevisionController::class, 'getRevisionStats']);
     });
 });
