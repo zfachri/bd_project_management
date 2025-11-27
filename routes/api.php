@@ -153,6 +153,8 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::put('/{documentId}/info', [DocumentManagementController::class, 'updateDocumentInfo']);
 
         Route::get('/document/view/{documentId}', [DocumentManagementController::class, 'viewDocument']);
+
+        Route::post('/{documentId}/allVersion', [DocumentManagementController::class, 'getAllVersions']);
     });
 
     Route::prefix('document-submission')->group(function () {

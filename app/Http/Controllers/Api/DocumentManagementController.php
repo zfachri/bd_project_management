@@ -551,7 +551,17 @@ class DocumentManagementController extends Controller
                     'latestVersion',
                     'organization',
                     'user',
-                    'documentRoles'
+                    'documentRoles',
+                    'raciActivities' => function($q) {
+                    $q->with([
+                        'position' => function($posQuery) {
+                            $posQuery->with([
+                                'organization',
+                                'positionLevel'
+                            ]);
+                        }
+                    ]);
+                }
                 ]);
 
             if (!$isAdmin) {
@@ -781,4 +791,86 @@ class DocumentManagementController extends Controller
             ], 500);
         }
     }
+
+    /**
+ * Get all versions of a document THOLOL
+ */
+public function getAllVersions(Request $request, $documentId)
+{
+    $validator = Validator::make($request->all(), [
+        'organization_id' => 'required|integer|exists:Organization,OrganizationID',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Validation failed',
+            'errors' => $validator->errors()
+        ], 422);
+    }
+
+    try {
+        $organizationId = $request->input('organization_id');
+        
+        // Check if document exists
+        $document = DocumentManagement::with('documentRoles')
+            ->findOrFail($documentId);
+
+        // Check access permission
+        $isOwner = $document->OrganizationID == $organizationId;
+        $hasAccess = $isOwner;
+
+        if (!$isOwner) {
+            $accessRole = $document->documentRoles
+                ->where('OrganizationID', $organizationId)
+                ->first();
+            
+            if ($accessRole) {
+                $hasAccess = true;
+            }
+        }
+
+        if (!$hasAccess) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have access to this document'
+            ], 403);
+        }
+
+        // Get all versions ordered by version number descending (latest first)
+        $versions = DocumentVersion::where('DocumentManagementID', $documentId)
+            ->orderBy('VersionNo', 'desc')
+            ->get()
+            ->map(function ($version) {
+                return [
+                    'version_no' => $version->VersionNo,
+                    'document_path' => $version->DocumentPath,
+                    'document_url' => $version->DocumentUrl,
+                    'created_at' => $version->AtTimeStamp,
+                    'created_at_formatted' => Carbon::createFromTimestamp($version->AtTimeStamp)
+                        ->format('Y-m-d H:i:s'),
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Document versions retrieved successfully',
+            'data' => [
+                'document_id' => $documentId,
+                'document_name' => $document->DocumentName,
+                'document_type' => $document->DocumentType,
+                'latest_version_no' => $document->LatestVersionNo,
+                'total_versions' => $versions->count(),
+                'versions' => $versions,
+            ]
+        ], 200);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to retrieve document versions',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
 }

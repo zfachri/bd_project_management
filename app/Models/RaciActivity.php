@@ -9,10 +9,11 @@ class RaciActivity extends Model
 {
     protected $table = 'RaciActivity';
     protected $primaryKey = 'RaciActivityID';
-    public $incrementing = true;
+    public $incrementing = false;
     public $timestamps = false;
 
     protected $fillable = [
+        'RaciActivityID',
         'DocumentManagementID',
         'Activity',
         'PIC',
