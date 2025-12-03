@@ -8,6 +8,7 @@ use App\Models\DocumentManagement;
 use App\Models\DocumentRevision;
 use App\Models\DocumentRole;
 use App\Models\Employee;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,7 +32,7 @@ class DocumentRevisionController extends Controller
      */
     private function userHasDocumentAccess($documentManagementId, $userId)
     {
-        $user = Auth::user();
+        $user = User::find($userId);
         
         // Admin always has access
         if ($user->IsAdministrator) {
@@ -58,7 +59,7 @@ class DocumentRevisionController extends Controller
     {
         try {
             $document = DocumentManagement::findOrFail($documentManagementId);
-            $user = Auth::user();
+            $user = $request->auth_user;
 
             // Check document access
             if (!$this->userHasDocumentAccess($documentManagementId, $user->UserID)) {
@@ -108,8 +109,8 @@ class DocumentRevisionController extends Controller
         DB::beginTransaction();
 
         try {
-            $authUserId = Auth::id();
-            $user = Auth::user();
+            $authUserId = $request->auth_user_id;
+            $user = $request->auth_user;
             $timestamp = Carbon::now()->timestamp;
 
             $document = DocumentManagement::findOrFail($documentManagementId);
@@ -131,6 +132,10 @@ class DocumentRevisionController extends Controller
                 'Status' => 'request',
                 'VersionNo' => $document->LatestVersionNo // Tambahkan VersionNo saat ini
             ]);
+
+            // kirim email ke semua admin
+
+            // kirim email ke pembuat info comment revision sedang di tinjau oleh admin
 
             // Create audit log
             AuditLog::create([
@@ -189,13 +194,13 @@ class DocumentRevisionController extends Controller
         DB::beginTransaction();
 
         try {
-            $authUserId = Auth::id();
+            $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
 
             $revision = DocumentRevision::findOrFail($revisionId);
 
             // Check if user is admin
-            $user = Auth::user();
+            $user = $request->auth_user;
             if (!$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
@@ -242,6 +247,8 @@ class DocumentRevisionController extends Controller
 
             DB::commit();
 
+            //kirim email ke pembuat revision bahwa comment revisionnya sudah di accept oleh admin (bersangkutan)
+
             return response()->json([
                 'success' => true,
                 'message' => 'Revision approved successfully. Document version can now be updated separately.',
@@ -278,13 +285,13 @@ class DocumentRevisionController extends Controller
         DB::beginTransaction();
 
         try {
-            $authUserId = Auth::id();
+            $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
 
             $revision = DocumentRevision::findOrFail($revisionId);
 
             // Check if user is admin
-            $user = Auth::user();
+            $user = $request->auth_user;
             if (!$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
@@ -330,6 +337,7 @@ class DocumentRevisionController extends Controller
             ]);
 
             DB::commit();
+            //kirim email ke pembuat revision bahwa comment revisionnya di decline oleh admin (bersangkutan) dengan alasan : ${alasan}
 
             return response()->json([
                 'success' => true,
@@ -354,7 +362,7 @@ class DocumentRevisionController extends Controller
     public function getMyRevisions(Request $request): JsonResponse
     {
         try {
-            $user = Auth::user();
+            $user = $request->auth_user;
             $userOrganizationId = $this->getUserOrganizationId($user->UserID);
             
             if (!$userOrganizationId) {
@@ -395,7 +403,7 @@ class DocumentRevisionController extends Controller
     public function getRevision(Request $request, $revisionId): JsonResponse
     {
         try {
-            $user = Auth::user();
+            $user = $request->auth_user;
             
             $revision = DocumentRevision::with(['documentManagement', 'user', 'notesBy'])
                 ->findOrFail($revisionId);
@@ -441,7 +449,7 @@ class DocumentRevisionController extends Controller
         }
 
         try {
-            $user = Auth::user();
+            $user = $request->auth_user;
             
             // For non-admin users, filter by accessible documents
             $query = DocumentRevision::with(['documentManagement', 'user', 'notesBy']);
@@ -497,10 +505,10 @@ class DocumentRevisionController extends Controller
     /**
      * Admin: Get pending revisions
      */
-    public function getPendingRevisions(): JsonResponse
+    public function getPendingRevisions(Request $request): JsonResponse
     {
         try {
-            $user = Auth::user();
+            $user = $request->auth_user;
             
             $query = DocumentRevision::where('Status', 'request')
                 ->with(['documentManagement', 'user']);
@@ -545,7 +553,7 @@ class DocumentRevisionController extends Controller
     public function getRevisionStats(Request $request): JsonResponse
     {
         try {
-            $user = Auth::user();
+            $user = $request->auth_user;
 
             $query = DocumentRevision::query();
 
@@ -595,10 +603,10 @@ class DocumentRevisionController extends Controller
     /**
      * Get approved revisions ready for version update
      */
-    public function getApprovedRevisions(): JsonResponse
+    public function getApprovedRevisions(Request $request): JsonResponse
     {
         try {
-            $user = Auth::user();
+            $user = $request->auth_user;
             
             $query = DocumentRevision::where('Status', 'approve')
                 ->with(['documentManagement', 'user', 'notesBy']);

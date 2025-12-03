@@ -9,6 +9,7 @@ use App\Models\DocumentVersion;
 use App\Models\RaciActivity;
 use App\Models\DocumentRole;
 use App\Models\Employee;
+use App\Models\Position;
 use App\Services\MinioService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -30,7 +31,7 @@ class DocumentManagementController extends Controller
     public function createDocument(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'document_name' => 'required|string|max:255',
+            'document_name' => 'required|string|max:255|unique:DocumentManagement,DocumentName',
             'document_type' => 'required|string|max:255',
             'description' => 'nullable|string',
             'notes' => 'nullable|string',
@@ -40,6 +41,11 @@ class DocumentManagementController extends Controller
             'filename' => 'required|string|max:255',
             'content_type' => 'required|string|max:100',
             'file_size' => 'nullable|integer|min:1',
+
+            // Converted PDF (if original is not PDF)
+            'has_converted_pdf' => 'nullable|boolean',
+            'converted_filename' => 'nullable|required_if:has_converted_pdf,true|string|max:255',
+            'converted_file_size' => 'nullable|integer|min:1',
 
             // RACI Activities (only if DocumentType = 'RACI')
             'raci_activities' => 'nullable|array',
@@ -68,6 +74,7 @@ class DocumentManagementController extends Controller
             // $authUserId = $request->user()->UserID ?? $request->user()->id;
             $timestamp = Carbon::now()->timestamp;
             $documentType = $request->input('document_type');
+            $hasConvertedPdf = $request->input('has_converted_pdf', false);
 
             // Validate RACI activities only required if DocumentType = 'RACI'
             if ($documentType === 'RACI' && !$request->has('raci_activities')) {
@@ -88,27 +95,122 @@ class DocumentManagementController extends Controller
                 'LatestVersionNo' => 1,
             ]);
 
-            // Generate presigned URL for version 1
-            $result = $this->minioService->generatePresignedUploadUrl(
-                moduleName: 'DocumentManagement',
-                moduleNameId: (string) $document->DocumentManagementID,
-                filename: $request->input('filename'),
-                contentType: $request->input('content_type'),
-                fileSize: $request->input('file_size', 0)
-            );
+            // ========================================
+            // CASE 1: PDF Upload (No conversion needed)
+            // ========================================
+            if (!$hasConvertedPdf) {
+                // Generate presigned URL for PDF
+                $originalResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'DocumentManagement',
+                    moduleNameId: (string) $document->DocumentManagementID,
+                    filename: $request->input('filename'),
+                    contentType: $request->input('content_type'),
+                    fileSize: $request->input('file_size', 0)
+                );
 
-            $staticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
-                . '/' . config('filesystems.disks.minio.bucket')
-                . '/' . $result['file_info']['path'];
+                $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $originalResult['file_info']['path'];
 
-            // Create DocumentVersion v1
-            DocumentVersion::create([
-                'DocumentManagementID' => $document->DocumentManagementID,
-                'VersionNo' => 1,
-                'DocumentPath' => $result['file_info']['path'],
-                'DocumentUrl'  => $staticUrl,
-                'AtTimeStamp' => $timestamp,
-            ]);
+                // Create DocumentVersion (PDF only)
+                DocumentVersion::create([
+                    'DocumentManagementID' => $document->DocumentManagementID,
+                    'VersionNo' => 1,
+                    'DocumentPath' => $originalResult['file_info']['path'], // PDF for display
+                    'DocumentUrl' => $pdfStaticUrl,
+                    'DocumentOriginalPath' => null, // No original (already PDF)
+                    'DocumentOriginalUrl' => null,
+                    'AtTimeStamp' => $timestamp,
+                ]);
+
+                $responseData = [
+                    'document_id' => $document->DocumentManagementID,
+                    'document_name' => $document->DocumentName,
+                    'document_type' => $document->DocumentType,
+                    'version_no' => 1,
+                    'upload_url' => $originalResult['upload_url'],
+                    'file_path' => $originalResult['file_info']['path'],
+                    'filename' => $originalResult['file_info']['filename'],
+                    'expires_in' => $originalResult['expires_in'],
+                ];
+            }  // ========================================
+            // CASE 2: Non-PDF Upload (Needs conversion)
+            // ========================================
+            else {
+                // Generate presigned URL for ORIGINAL file (DOCX, XLSX, etc)
+                $originalResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'DocumentManagement',
+                    moduleNameId: (string) $document->DocumentManagementID,
+                    filename: $request->input('filename'),
+                    contentType: $request->input('content_type'),
+                    fileSize: $request->input('file_size', 0)
+                );
+
+                $originalStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $originalResult['file_info']['path'];
+
+                // Generate presigned URL for CONVERTED PDF
+                $convertedResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'DocumentManagement',
+                    moduleNameId: (string) $document->DocumentManagementID,
+                    filename: $request->input('converted_filename'),
+                    contentType: 'application/pdf',
+                    fileSize: $request->input('converted_file_size', 0)
+                );
+
+                $convertedStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $convertedResult['file_info']['path'];
+
+                // Create DocumentVersion (PDF + Original)
+                DocumentVersion::create([
+                    'DocumentManagementID' => $document->DocumentManagementID,
+                    'VersionNo' => 1,
+                    'DocumentPath' => $convertedResult['file_info']['path'], // Converted PDF (for display)
+                    'DocumentUrl' => $convertedStaticUrl,
+                    'DocumentOriginalPath' => $originalResult['file_info']['path'], // Original file (for download)
+                    'DocumentOriginalUrl' => $originalStaticUrl,
+                    'AtTimeStamp' => $timestamp,
+                ]);
+
+                $responseData = [
+                    'document_id' => $document->DocumentManagementID,
+                    'document_name' => $document->DocumentName,
+                    'document_type' => $document->DocumentType,
+                    'version_no' => 1,
+                    'upload_url' => $convertedResult['upload_url'],
+                    'file_path' => $convertedResult['file_info']['path'],
+                    'filename' => $convertedResult['file_info']['filename'],
+                    'expires_in' => $convertedResult['expires_in'],
+                    'original_upload_url' => $originalResult['upload_url'],
+                    'original_file_path' => $originalResult['file_info']['path'],
+                    'original_filename' => $originalResult['file_info']['filename'],
+                    'original_expires_in' => $originalResult['expires_in'],
+                ];
+            }
+
+            // // Generate presigned URL for version 1
+            // $result = $this->minioService->generatePresignedUploadUrl(
+            //     moduleName: 'DocumentManagement',
+            //     moduleNameId: (string) $document->DocumentManagementID,
+            //     filename: $request->input('filename'),
+            //     contentType: $request->input('content_type'),
+            //     fileSize: $request->input('file_size', 0)
+            // );
+
+            // $staticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+            //     . '/' . config('filesystems.disks.minio.bucket')
+            //     . '/' . $result['file_info']['path'];
+
+            // // Create DocumentVersion v1
+            // DocumentVersion::create([
+            //     'DocumentManagementID' => $document->DocumentManagementID,
+            //     'VersionNo' => 1,
+            //     'DocumentPath' => $result['file_info']['path'],
+            //     'DocumentUrl'  => $staticUrl,
+            //     'AtTimeStamp' => $timestamp,
+            // ]);
 
             // Insert DocumentRole for owner organization (OrganizationID from DocumentManagement)
             DocumentRole::create([
@@ -166,7 +268,9 @@ class DocumentManagementController extends Controller
                     'DocumentType' => $document->DocumentType,
                     'OrganizationID' => $document->OrganizationID,
                     'VersionNo' => 1,
-                    'DocumentPath' => $result['file_info']['path'],
+                    'HasConvertedPDF' => $hasConvertedPdf,
+                    'DocumentPath' => !$hasConvertedPdf ? $originalResult['file_info']['path'] : $convertedResult['file_info']['path'],
+                    'DocumentOriginalPath' =>   $originalResult['file_info']['path'],
                     'AccessOrganizations' => array_merge(
                         [$document->OrganizationID],
                         $request->input('access_organization_ids', [])
@@ -180,16 +284,7 @@ class DocumentManagementController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Document created successfully',
-                'data' => [
-                    'document_id' => $document->DocumentManagementID,
-                    'document_name' => $document->DocumentName,
-                    'document_type' => $document->DocumentType,
-                    'version_no' => 1,
-                    'upload_url' => $result['upload_url'],
-                    'file_path' => $result['file_info']['path'],
-                    'filename' => $result['file_info']['filename'],
-                    'expires_in' => $result['expires_in'],
-                ]
+                'data' => $responseData
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -212,6 +307,11 @@ class DocumentManagementController extends Controller
             'content_type' => 'required|string|max:100',
             'file_size' => 'nullable|integer|min:1',
             'notes' => 'nullable|string',
+
+            // Converted PDF (if original is not PDF)
+            'has_converted_pdf' => 'nullable|boolean',
+            'converted_filename' => 'nullable|required_if:has_converted_pdf,true|string|max:255',
+            'converted_file_size' => 'nullable|integer|min:1',
         ]);
 
         if ($validator->fails()) {
@@ -228,6 +328,7 @@ class DocumentManagementController extends Controller
             $authUserId = $request->auth_user_id;
             // $authUserId = $request->user()->UserID ?? $request->user()->id;
             $timestamp = Carbon::now()->timestamp;
+            $hasConvertedPdf = $request->input('has_converted_pdf', false);
 
             // Check if document exists
             $document = DocumentManagement::findOrFail($documentId);
@@ -236,27 +337,123 @@ class DocumentManagementController extends Controller
             $currentVersion = $document->LatestVersionNo ?? 1;
             $newVersionNo = $currentVersion + 1;
 
-            // Generate presigned URL for new version
-            $result = $this->minioService->generatePresignedUploadUrl(
-                moduleName: 'DocumentManagement',
-                moduleNameId: (string) $documentId,
-                filename: $request->input('filename'),
-                contentType: $request->input('content_type'),
-                fileSize: $request->input('file_size', 0)
-            );
+            // ========================================
+            // CASE 1: PDF Upload (No conversion needed)
+            // ========================================
+            if (!$hasConvertedPdf) {
+                $originalResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'DocumentManagement',
+                    moduleNameId: (string) $documentId,
+                    filename: $request->input('filename'),
+                    contentType: $request->input('content_type'),
+                    fileSize: $request->input('file_size', 0)
+                );
 
-            // Create new DocumentVersion
-            $staticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
-                . '/' . config('filesystems.disks.minio.bucket')
-                . '/' . $result['file_info']['path'];
+                $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $originalResult['file_info']['path'];
 
-            DocumentVersion::create([
-                'DocumentManagementID' => $documentId,
-                'VersionNo' => $newVersionNo,
-                'DocumentPath' => $result['file_info']['path'],
-                'DocumentUrl'  => $staticUrl,
-                'AtTimeStamp' => $timestamp,
-            ]);
+                // Create new DocumentVersion (PDF only)
+                DocumentVersion::create([
+                    'DocumentManagementID' => $documentId,
+                    'VersionNo' => $newVersionNo,
+                    'DocumentPath' => $originalResult['file_info']['path'],
+                    'DocumentUrl' => $pdfStaticUrl,
+                    'DocumentOriginalPath' => null,
+                    'DocumentOriginalUrl' => null,
+                    'AtTimeStamp' => $timestamp,
+                ]);
+
+                $responseData = [
+                    'document_id' => $documentId,
+                    'document_name' => $document->DocumentName,
+                    'previous_version' => $currentVersion,
+                    'current_version' => $newVersionNo,
+                    'upload_url' => $originalResult['upload_url'],
+                    'file_path' => $originalResult['file_info']['path'],
+                    'filename' => $originalResult['file_info']['filename'],
+                    'expires_in' => $originalResult['expires_in'],
+                ];
+            }
+            // ========================================
+            // CASE 2: Non-PDF Upload (Needs conversion)
+            // ========================================
+            else {
+                // Generate presigned URL for ORIGINAL file
+                $originalResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'DocumentManagement',
+                    moduleNameId: (string) $documentId,
+                    filename: $request->input('filename'),
+                    contentType: $request->input('content_type'),
+                    fileSize: $request->input('file_size', 0)
+                );
+
+                $originalStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $originalResult['file_info']['path'];
+
+                // Generate presigned URL for CONVERTED PDF
+                $convertedResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'DocumentManagement',
+                    moduleNameId: (string) $documentId,
+                    filename: $request->input('converted_filename'),
+                    contentType: 'application/pdf',
+                    fileSize: $request->input('converted_file_size', 0)
+                );
+
+                $convertedStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $convertedResult['file_info']['path'];
+
+                // Create new DocumentVersion (PDF + Original)
+                DocumentVersion::create([
+                    'DocumentManagementID' => $documentId,
+                    'VersionNo' => $newVersionNo,
+                    'DocumentPath' => $convertedResult['file_info']['path'], // PDF for display
+                    'DocumentUrl' => $convertedStaticUrl,
+                    'DocumentOriginalPath' => $originalResult['file_info']['path'], // Original for download
+                    'DocumentOriginalUrl' => $originalStaticUrl,
+                    'AtTimeStamp' => $timestamp,
+                ]);
+
+                $responseData = [
+                    'document_id' => $documentId,
+                    'document_name' => $document->DocumentName,
+                    'previous_version' => $currentVersion,
+                    'current_version' => $newVersionNo,
+                    'upload_url' => $convertedResult['upload_url'],
+                    'file_path' => $convertedResult['file_info']['path'],
+                    'filename' => $convertedResult['file_info']['filename'],
+                    'expires_in' => $convertedResult['expires_in'],
+                    'original_upload_url' => $originalResult['upload_url'],
+                    'original_file_path' => $originalResult['file_info']['path'],
+                    'original_filename' => $originalResult['file_info']['filename'],
+                    'original_expires_in' => $originalResult['expires_in'],
+
+                ];
+            }
+
+            // // Generate presigned URL for new version
+            // $result = $this->minioService->generatePresignedUploadUrl(
+            //     moduleName: 'DocumentManagement',
+            //     moduleNameId: (string) $documentId,
+            //     filename: $request->input('filename'),
+            //     contentType: $request->input('content_type'),
+            //     fileSize: $request->input('file_size', 0)
+            // );
+
+            // // Create new DocumentVersion
+            // $staticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+            //     . '/' . config('filesystems.disks.minio.bucket')
+            //     . '/' . $result['file_info']['path'];
+
+            // DocumentVersion::create([
+            //     'DocumentManagementID' => $documentId,
+            //     'VersionNo' => $newVersionNo,
+            //     'DocumentPath' => $result['file_info']['path'],
+            //     'DocumentUrl'  => $staticUrl,
+            //     'AtTimeStamp' => $timestamp,
+            // ]);
 
             // Update LatestVersionNo and Notes in DocumentManagement
             $document->update([
@@ -277,7 +474,9 @@ class DocumentManagementController extends Controller
                     'DocumentName' => $document->DocumentName,
                     'PreviousVersionNo' => $currentVersion,
                     'NewVersionNo' => $newVersionNo,
-                    'DocumentPath' => $result['file_info']['path'],
+                    'HasConvertedPDF' => $hasConvertedPdf,
+                    'DocumentPath' => !$hasConvertedPdf ? $originalResult['file_info']['path'] : $convertedResult['file_info']['path'],
+                    'DocumentOriginalPath' =>   $originalResult['file_info']['path'],
                 ]),
                 'Note' => "Document updated - version {$newVersionNo} created"
             ]);
@@ -287,16 +486,7 @@ class DocumentManagementController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Document updated successfully',
-                'data' => [
-                    'document_id' => $documentId,
-                    'document_name' => $document->DocumentName,
-                    'previous_version' => $currentVersion,
-                    'current_version' => $newVersionNo,
-                    'upload_url' => $result['upload_url'],
-                    'file_path' => $result['file_info']['path'],
-                    'filename' => $result['file_info']['filename'],
-                    'expires_in' => $result['expires_in'],
-                ]
+                'data' => $responseData
             ], 200);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -552,16 +742,16 @@ class DocumentManagementController extends Controller
                     'organization',
                     'user',
                     'documentRoles',
-                    'raciActivities' => function($q) {
-                    $q->with([
-                        'position' => function($posQuery) {
-                            $posQuery->with([
-                                'organization',
-                                'positionLevel'
-                            ]);
-                        }
-                    ]);
-                }
+                    'raciActivities' => function ($q) {
+                        $q->with([
+                            'position' => function ($posQuery) {
+                                $posQuery->with([
+                                    'organization',
+                                    'positionLevel'
+                                ]);
+                            }
+                        ]);
+                    }
                 ]);
 
             if (!$isAdmin) {
@@ -793,84 +983,246 @@ class DocumentManagementController extends Controller
     }
 
     /**
- * Get all versions of a document THOLOL
- */
-public function getAllVersions(Request $request, $documentId)
-{
-    $validator = Validator::make($request->all(), [
-        'organization_id' => 'required|integer|exists:Organization,OrganizationID',
-    ]);
+     * Get all versions of a document
+     */
+    public function getAllVersions(Request $request, $documentId)
+    {
+        $validator = Validator::make($request->all(), [
+            'organization_id' => 'required|integer|exists:Organization,OrganizationID',
+        ]);
 
-    if ($validator->fails()) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Validation failed',
-            'errors' => $validator->errors()
-        ], 422);
-    }
-
-    try {
-        $organizationId = $request->input('organization_id');
-        
-        // Check if document exists
-        $document = DocumentManagement::with('documentRoles')
-            ->findOrFail($documentId);
-
-        // Check access permission
-        $isOwner = $document->OrganizationID == $organizationId;
-        $hasAccess = $isOwner;
-
-        if (!$isOwner) {
-            $accessRole = $document->documentRoles
-                ->where('OrganizationID', $organizationId)
-                ->first();
-            
-            if ($accessRole) {
-                $hasAccess = true;
-            }
-        }
-
-        if (!$hasAccess) {
+        if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'message' => 'You do not have access to this document'
-            ], 403);
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
         }
 
-        // Get all versions ordered by version number descending (latest first)
-        $versions = DocumentVersion::where('DocumentManagementID', $documentId)
-            ->orderBy('VersionNo', 'desc')
-            ->get()
-            ->map(function ($version) {
-                return [
-                    'version_no' => $version->VersionNo,
-                    'document_path' => $version->DocumentPath,
-                    'document_url' => $version->DocumentUrl,
-                    'created_at' => $version->AtTimeStamp,
-                    'created_at_formatted' => Carbon::createFromTimestamp($version->AtTimeStamp)
-                        ->format('Y-m-d H:i:s'),
-                ];
-            });
+        try {
+            $organizationId = $request->input('organization_id');
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Document versions retrieved successfully',
-            'data' => [
-                'document_id' => $documentId,
-                'document_name' => $document->DocumentName,
-                'document_type' => $document->DocumentType,
-                'latest_version_no' => $document->LatestVersionNo,
-                'total_versions' => $versions->count(),
-                'versions' => $versions,
-            ]
-        ], 200);
+            // Check if document exists
+            $document = DocumentManagement::with('documentRoles')
+                ->findOrFail($documentId);
 
-    } catch (\Exception $e) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Failed to retrieve document versions',
-            'error' => $e->getMessage()
-        ], 500);
+            // Check access permission
+            $isOwner = $document->OrganizationID == $organizationId;
+            $hasAccess = $isOwner;
+
+            if (!$isOwner) {
+                $accessRole = $document->documentRoles
+                    ->where('OrganizationID', $organizationId)
+                    ->first();
+
+                if ($accessRole) {
+                    $hasAccess = true;
+                }
+            }
+
+            if (!$hasAccess) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this document'
+                ], 403);
+            }
+
+            // Get all versions ordered by version number descending (latest first)
+            $versions = DocumentVersion::where('DocumentManagementID', $documentId)
+                ->orderBy('VersionNo', 'desc')
+                ->get()
+                ->map(function ($version) {
+                    return [
+                        'version_no' => $version->VersionNo,
+                        'document_path' => $version->DocumentPath,
+                        'document_url' => $version->DocumentUrl,
+                        'created_at' => $version->AtTimeStamp,
+                        'created_at_formatted' => Carbon::createFromTimestamp($version->AtTimeStamp)
+                            ->format('Y-m-d H:i:s'),
+                    ];
+                });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Document versions retrieved successfully',
+                'data' => [
+                    'document_id' => $documentId,
+                    'document_name' => $document->DocumentName,
+                    'document_type' => $document->DocumentType,
+                    'latest_version_no' => $document->LatestVersionNo,
+                    'total_versions' => $versions->count(),
+                    'versions' => $versions,
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve document versions',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
-}
+
+    /**
+     * Add RACI activities to existing document
+     */
+    public function addRaciDocument(Request $request, $documentId)
+    {
+        $validator = Validator::make($request->all(), [
+            'organization_id' => 'required|integer|exists:Organization,OrganizationID',
+            'raci_activities' => 'required|array|min:1',
+            'raci_activities.*.activity' => 'required|string|max:255',
+            'raci_activities.*.pic' => 'required|integer|exists:Position,PositionID',
+            'raci_activities.*.status' => 'required|in:Informed,Accountable,Consulted',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+
+        try {
+            $authUserId = $request->auth_user_id;
+            $organizationId = $request->input('organization_id');
+            $timestamp = Carbon::now()->timestamp;
+
+            // Check if document exists
+            $document = DocumentManagement::with('documentRoles')
+                ->findOrFail($documentId);
+
+            // Check access permission (only owner can add RACI)
+            $isOwner = $document->OrganizationID == $organizationId;
+
+            if (!$isOwner) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only document owner can add RACI activities'
+                ], 403);
+            }
+
+            // Get all allowed organization IDs (main organization + DocumentRoles)
+            $allowedOrgIds = [$document->OrganizationID];
+
+            $documentRoleOrgIds = $document->documentRoles
+                ->pluck('OrganizationID')
+                ->toArray();
+
+            $allowedOrgIds = array_merge($allowedOrgIds, $documentRoleOrgIds);
+            $allowedOrgIds = array_unique($allowedOrgIds);
+
+            // Validate each RACI activity's PIC
+            $raciActivities = $request->input('raci_activities');
+            $invalidPositions = [];
+
+            foreach ($raciActivities as $index => $raciData) {
+                $positionId = $raciData['pic'];
+
+                // Check if Position exists and get its OrganizationID
+                $position = Position::with('organization')
+                    ->find($positionId);
+
+                if (!$position) {
+                    $invalidPositions[] = [
+                        'index' => $index,
+                        'position_id' => $positionId,
+                        'reason' => 'Position not found'
+                    ];
+                    continue;
+                }
+
+                // Check if Position's OrganizationID is in allowed organizations
+                if (!in_array($position->OrganizationID, $allowedOrgIds)) {
+                    $invalidPositions[] = [
+                        'index' => $index,
+                        'position_id' => $positionId,
+                        'position_name' => $position->PositionName ?? 'N/A',
+                        'position_organization_id' => $position->OrganizationID,
+                        'position_organization_name' => $position->organization->OrganizationName ?? 'N/A',
+                        'reason' => 'Position organization not in document access list',
+                        'allowed_organizations' => $allowedOrgIds
+                    ];
+                }
+            }
+
+            // If there are invalid positions, return error
+            if (!empty($invalidPositions)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Some positions are not from organizations with access to this document',
+                    'errors' => [
+                        'invalid_positions' => $invalidPositions,
+                        'allowed_organization_ids' => $allowedOrgIds
+                    ]
+                ], 422);
+            }
+
+            // Delete existing RACI activities for this document (optional: if you want to replace)
+            // RaciActivity::where('DocumentManagementID', $documentId)->delete();
+
+            // Create new RACI activities
+            $createdRaciActivities = [];
+
+            foreach ($raciActivities as $raciData) {
+                $raciActivity = RaciActivity::create([
+                    'RaciActivityID' => Carbon::now()->timestamp . random_numbersu(5),
+                    'DocumentManagementID' => $documentId,
+                    'Activity' => $raciData['activity'],
+                    'PIC' => $raciData['pic'],
+                    'Status' => $raciData['status'],
+                ]);
+
+                $createdRaciActivities[] = $raciActivity;
+            }
+
+            // Create audit log
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'ReferenceTable' => 'RaciActivity',
+                'ReferenceRecordID' => $documentId,
+                'Data' => json_encode([
+                    'DocumentManagementID' => $documentId,
+                    'DocumentName' => $document->DocumentName,
+                    'RaciActivitiesCount' => count($createdRaciActivities),
+                    'RaciActivities' => $raciActivities,
+                    'AllowedOrganizations' => $allowedOrgIds,
+                ]),
+                'Note' => 'RACI activities added to document'
+            ]);
+
+            DB::commit();
+
+            // Load position details for response
+            $raciActivitiesWithDetails = RaciActivity::with('position.organization')
+                ->whereIn('RaciActivityID', collect($createdRaciActivities)->pluck('RaciActivityID'))
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'RACI activities added successfully',
+                'data' => [
+                    'document_id' => $documentId,
+                    'document_name' => $document->DocumentName,
+                    'total_raci_activities' => count($createdRaciActivities),
+                    'allowed_organizations' => $allowedOrgIds,
+                    'raci_activities' => $raciActivitiesWithDetails,
+                ]
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to add RACI activities',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

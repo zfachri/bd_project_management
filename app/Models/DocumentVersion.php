@@ -19,6 +19,8 @@ class DocumentVersion extends Model
         'VersionNo',
         'DocumentPath',
         'DocumentUrl',
+        'DocumentOriginalPath', // Original file path (optional)
+        'DocumentOriginalUrl',  // Original file URL (optional)
         'AtTimeStamp',
     ];
 

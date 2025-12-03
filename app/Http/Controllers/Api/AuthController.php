@@ -503,7 +503,7 @@ class AuthController extends Controller
         $timestamp = Carbon::now()->timestamp;
         $salt = Str::uuid()->toString();
         $user->update([
-            'Password' => Hash::make($request->new_password . $salt),
+            'Password' => Hash::make($request->NewPassword . $salt),
             'AtTimeStamp' => $timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U'
