@@ -155,6 +155,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::get('/document/view/{documentId}', [DocumentManagementController::class, 'viewDocument']);
 
         Route::post('/{documentId}/allVersion', [DocumentManagementController::class, 'getAllVersions']);
+        Route::post('/{documentId}/add-raci-document', [DocumentManagementController::class, 'addRaciDocument']);
     });
 
     Route::prefix('document-submission')->group(function () {
