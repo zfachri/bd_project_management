@@ -26,6 +26,22 @@ class RaciActivity extends Model
         'PIC' => 'integer',
     ];
 
+    // Konstanta untuk Status RACI
+    const STATUS_INFORMED = 'Informed';
+    const STATUS_ACCOUNTABLE = 'Accountable';
+    const STATUS_CONSULTED = 'Consulted';
+    const STATUS_RESPONSIBLE = 'Responsible';
+
+    public static function getStatuses()
+    {
+        return [
+            self::STATUS_INFORMED,
+            self::STATUS_ACCOUNTABLE,
+            self::STATUS_CONSULTED,
+            self::STATUS_RESPONSIBLE,
+        ];
+    }
+
     /**
      * Relationship to DocumentManagement
      */

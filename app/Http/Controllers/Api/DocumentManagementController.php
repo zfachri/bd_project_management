@@ -51,7 +51,7 @@ class DocumentManagementController extends Controller
             'raci_activities' => 'nullable|array',
             'raci_activities.*.activity' => 'required_with:raci_activities|string|max:255',
             'raci_activities.*.pic' => 'required_with:raci_activities|integer|exists:Position,PositionID',
-            'raci_activities.*.status' => 'required_with:raci_activities|in:Informed,Accountable,Consulted',
+            'raci_activities.*.status' => 'required|in:' . implode(',', RaciActivity::getStatuses()),
 
             // Document Roles - multiple organizations that can access
             'access_organization_ids' => 'nullable|array',
@@ -1036,6 +1036,8 @@ class DocumentManagementController extends Controller
                         'version_no' => $version->VersionNo,
                         'document_path' => $version->DocumentPath,
                         'document_url' => $version->DocumentUrl,
+                        'document_original_path' => $version->DocumentOriginalPath ?? null,
+                        'document_original_url' => $version->DocumentOriginalUrl ?? null,
                         'created_at' => $version->AtTimeStamp,
                         'created_at_formatted' => Carbon::createFromTimestamp($version->AtTimeStamp)
                             ->format('Y-m-d H:i:s'),
@@ -1073,7 +1075,7 @@ class DocumentManagementController extends Controller
             'raci_activities' => 'required|array|min:1',
             'raci_activities.*.activity' => 'required|string|max:255',
             'raci_activities.*.pic' => 'required|integer|exists:Position,PositionID',
-            'raci_activities.*.status' => 'required|in:Informed,Accountable,Consulted',
+            'raci_activities.*.status' => 'required|in:' . implode(',', RaciActivity::getStatuses()),
         ]);
 
         if ($validator->fails()) {

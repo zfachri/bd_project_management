@@ -93,4 +93,46 @@ class Employee extends Model
     {
         return $query->where('IsDelete', false)->whereNull('ResignDate');
     }
+
+    public function employeeRole()
+{
+    return $this->hasOne(EmployeeRole::class, 'EmployeeID', 'EmployeeID')
+        ->active()
+        ->with(['role.permissions.module']);
+}
+
+public function role()
+{
+    return $this->hasOneThrough(
+        Role::class,
+        EmployeeRole::class,
+        'EmployeeID', // Foreign key on EmployeeRole
+        'RoleID',     // Foreign key on Role
+        'EmployeeID', // Local key on Employee
+        'RoleID'      // Local key on EmployeeRole
+    )->where('EmployeeRole.IsActive', true)
+     ->where('EmployeeRole.IsDelete', false);
+}
+
+public function getPermissions()
+{
+    $employeeRole = $this->employeeRole;
+    
+    if (!$employeeRole || !$employeeRole->role) {
+        return [];
+    }
+    
+    return $employeeRole->role->getPermissionsArray();
+}
+public function hasPermission($permission)
+{
+    $permissions = $this->getPermissions();
+    return in_array($permission, $permissions);
+}
+
+public function can($action, $moduleName)
+{
+    $permission = "{$moduleName}.{$action}";
+    return $this->hasPermission($permission);
+}
 }

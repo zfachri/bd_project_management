@@ -94,8 +94,15 @@ class PositionController extends Controller
 
         $query = Position::active();
 
+            if ($organizationId !== null) {
+        if (!is_array($organizationId)) {
+            $organizationId = [$organizationId];
+        }
+    }
+
         if ($organizationId) {
-            $query->where('OrganizationID', $organizationId);
+            $organizationIds = $organizationId;
+            $query->whereIn('OrganizationID', $organizationIds);
         }
 
         if ($withHierarchy) {
@@ -706,7 +713,7 @@ public function getHierarchy(Request $request)
     $organizationId = $request->input('organization_id');
     $includeInactive = $request->input('include_inactive', false);
 
-    $query = Position::with(['positionLevel']);
+    $query = Position::with(['positionLevel', 'organization']);
 
     if ($organizationId) {
         $query->where('OrganizationID', $organizationId);
@@ -752,6 +759,23 @@ private function buildPositionHierarchy($position, $organizationId = null, $incl
         ->whereNull('EndDate')
         ->count();
 
+        // Get unique organizations from EmployeePosition
+    $organizationsInPosition = EmployeePosition::where('PositionID', $position->PositionID)
+        ->active()
+        ->whereNull('EndDate')
+        ->with('organization')
+        ->select('OrganizationID')
+        ->distinct()
+        ->get()
+        ->map(function($empPos) {
+            return [
+                'OrganizationID' => $empPos->OrganizationID,
+                'OrganizationName' => $empPos->organization->OrganizationName ?? null,
+            ];
+        })
+        ->values()
+        ->toArray();
+
     // Get child positions
     $childQuery = Position::with(['positionLevel'])
         ->where('ParentPositionID', $position->PositionID)
@@ -779,6 +803,8 @@ private function buildPositionHierarchy($position, $organizationId = null, $incl
     return [
         'PositionID' => $position->PositionID,
         'PositionName' => $position->PositionName,
+        'OrganizationID' => $position->OrganizationID,
+        'OrganizationName' => $position->organization->OrganizationName ?? null,
         'PositionLevel' => [
             'PositionLevelID' => $position->positionLevel->PositionLevelID ?? null,
             'PositionLevelName' => $position->positionLevel->PositionLevelName ?? null,

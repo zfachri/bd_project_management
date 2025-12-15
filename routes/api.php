@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\PositionLevelController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\EmployeeController;
 use App\Http\Controllers\Api\FileUploadController;
+use App\Http\Controllers\Api\RoleController;
 
 /*
 |--------------------------------------------------------------------------
@@ -33,12 +34,18 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
 
     Route::prefix('users')->group(function () {
-        Route::get('/', [UserController::class, 'index']);
-        Route::get('/{id}', [UserController::class, 'show']);
-        Route::post('/', [UserController::class, 'store']);
-        Route::put('/{id}', [UserController::class, 'update']);
-        Route::patch('/{id}/toggle-block', [UserController::class, 'toggleBlock']);
-        Route::patch('/{id}/toggle-suspend', [UserController::class, 'toggleSuspend']);
+        Route::middleware('permission:User.view')->group(function () {
+            Route::get('/', [UserController::class, 'index']);
+            Route::get('/{id}', [UserController::class, 'show']);
+        });
+
+        Route::post('/', [UserController::class, 'store'])->middleware('permission:User.create');
+
+        Route::middleware('permission:User.edit')->group(function () {
+            Route::put('/{id}', [UserController::class, 'update']);
+            Route::patch('/{id}/toggle-block', [UserController::class, 'toggleBlock']);
+            Route::patch('/{id}/toggle-suspend', [UserController::class, 'toggleSuspend']);
+        });
     });
 
     // Position Level Management
@@ -53,59 +60,64 @@ Route::middleware(['jwt.auth'])->group(function () {
 
     // Organization Management
     Route::prefix('organizations')->group(function () {
-        Route::get('/', [OrganizationController::class, 'index']);
-        Route::get('/all', [OrganizationController::class, 'all']);
-        Route::get('/level/{level}', [OrganizationController::class, 'getByLevel']);
-        // Get full hierarchy tree
-        Route::get('/hierarchy', [OrganizationController::class, 'getHierarchy']);
-
-        // Get hierarchy from specific organization
-        Route::get('/hierarchy/{id}', [OrganizationController::class, 'getHierarchyFrom']);
-        Route::get('/{id}', [OrganizationController::class, 'show']);
-        Route::get('/{id}/children', [OrganizationController::class, 'getChildren']);
-        Route::post('/', [OrganizationController::class, 'store']);
-        Route::put('/{id}', [OrganizationController::class, 'update']);
-        // Route::delete('/{id}', [OrganizationController::class, 'destroy']);
-        Route::patch('/{id}/toggle-active', [OrganizationController::class, 'toggleActive']);
+        Route::middleware('permission:Organization.view')->group(function () {
+            Route::get('/', [OrganizationController::class, 'index']);
+            Route::get('/all', [OrganizationController::class, 'all']);
+            Route::get('/{id}', [OrganizationController::class, 'show']);
+            Route::get('/level/{level}', [OrganizationController::class, 'getByLevel']);
+            Route::get('/hierarchy', [OrganizationController::class, 'getHierarchy']);
+            Route::get('/hierarchy/{id}', [OrganizationController::class, 'getHierarchyFrom']);
+            Route::get('/{id}/children', [OrganizationController::class, 'getChildren']);
+        });
+        Route::post('/', [OrganizationController::class, 'store'])->middleware('permission:Organization.create');
+        Route::middleware('permission:Organization.edit')->group(function () {
+            Route::put('/{id}', [OrganizationController::class, 'update']);
+            Route::patch('/{id}/toggle-active', [OrganizationController::class, 'toggleActive']);
+        });
     });
 
     // Position Management (with Job Description)
     Route::prefix('positions')->group(function () {
-        Route::get('/', [PositionController::class, 'index']);
-        Route::get('/all', [PositionController::class, 'all']);
-        Route::get('/hierarchy', [PositionController::class, 'getHierarchy']);
-        Route::get('/{id}/hierarchy', [PositionController::class, 'getPositionHierarchy']);
+        Route::middleware('permission:Position.view')->group(function () {
+            Route::get('/', [PositionController::class, 'index']);
+            Route::get('/all', [PositionController::class, 'all']);
+            Route::get('/{id}', [PositionController::class, 'show']);
+            Route::get('/hierarchy', [PositionController::class, 'getHierarchy']);
+            Route::get('/{id}/hierarchy', [PositionController::class, 'getPositionHierarchy']);
+            Route::get('/organization/{organizationId}', [PositionController::class, 'getByOrganization']);
+            Route::get('/{id}/children', [PositionController::class, 'getChildren']);
+            Route::get('/{positionId}/employees', [EmployeeController::class, 'getEmployeesByPosition']);
+            Route::get('/{positionId}/hierarchy/employees', [EmployeeController::class, 'getPositionHierarchyWithEmployees']);
+        });
 
-        Route::get('/organization/{organizationId}', [PositionController::class, 'getByOrganization']);
-        Route::get('/{id}', [PositionController::class, 'show']);
-        Route::get('/{id}/children', [PositionController::class, 'getChildren']);
-        Route::post('/', [PositionController::class, 'store']);
-        Route::put('/{id}', [PositionController::class, 'update']);
-        // Route::delete('/{id}', [PositionController::class, 'destroy']);
-        Route::patch('/{id}/toggle-active', [PositionController::class, 'toggleActive']);
-
-        // Employee hierarchy based on position
-        Route::get('/{positionId}/employees', [EmployeeController::class, 'getEmployeesByPosition']);
-        Route::get('/{positionId}/hierarchy/employees', [EmployeeController::class, 'getPositionHierarchyWithEmployees']);
+        Route::post('/', [PositionController::class, 'store'])->middleware('permission:Position.create');
+        Route::middleware('permission:Position.edit')->group(function () {
+            Route::put('/{id}', [PositionController::class, 'update']);
+            Route::patch('/{id}/toggle-active', [PositionController::class, 'toggleActive']);
+        });
     });
 
-    // Employee Management (with Position)
+    // Employee Management (with Position)  
     Route::prefix('employees')->group(function () {
-        Route::get('/', [EmployeeController::class, 'index']);
-        Route::get('/all', [EmployeeController::class, 'all']);
-        Route::get('/hierarchy/tree', [EmployeeController::class, 'getOrganizationHierarchyTree']);
-        Route::get('/{id}/hierarchy', [EmployeeController::class, 'getHierarchy']);
+        Route::middleware('permission:Employee.view')->group(function () {
+            Route::get('/', [EmployeeController::class, 'index']);
+            Route::get('/all', [EmployeeController::class, 'all']);
+            Route::get('/{id}', [EmployeeController::class, 'show']);
+            Route::get('/{id}/hierarchy', [EmployeeController::class, 'getHierarchy']);
+            Route::get('/hierarchy/tree', [EmployeeController::class, 'getOrganizationHierarchyTree']);
+        });
 
-        Route::get('/{id}', [EmployeeController::class, 'show']);
-        Route::post('/', [EmployeeController::class, 'store']);
-        Route::put('/{id}', [EmployeeController::class, 'update']);
-        Route::delete('/{id}', [EmployeeController::class, 'destroy']);
-        Route::patch('/{id}/resign', [EmployeeController::class, 'resign']);
+        Route::post('/', [EmployeeController::class, 'store'])->middleware('permission:Employee.create');
+        // Edit permission
+        Route::middleware('permission:Employee.edit')->group(function () {
+            Route::put('/{id}', [EmployeeController::class, 'update']);
+            Route::patch('/{id}/resign', [EmployeeController::class, 'resign']);
+            Route::post('/{id}/positions', [EmployeeController::class, 'addPosition']);
+            Route::put('/{id}/positions/{positionId}', [EmployeeController::class, 'updatePosition']);
+            Route::delete('/{id}/positions/{positionId}', [EmployeeController::class, 'removePosition']);
+        });
 
-        // Employee Position Management
-        Route::post('/{id}/positions', [EmployeeController::class, 'addPosition']);
-        Route::put('/{id}/positions/{positionId}', [EmployeeController::class, 'updatePosition']);
-        Route::delete('/{id}/positions/{positionId}', [EmployeeController::class, 'removePosition']);
+        Route::delete('/{id}', [EmployeeController::class, 'destroy'])->middleware('permission:Employee.delete');
     });
 
     Route::prefix('documents')->group(function () {
@@ -135,27 +147,25 @@ Route::middleware(['jwt.auth'])->group(function () {
     });
 
     Route::prefix('document-management')->group(function () {
-        Route::post('/create', [DocumentManagementController::class, 'createDocument']);
-
-        // Update document - create new version (current + 1)
-        Route::post('/{documentId}/upload-version', [DocumentManagementController::class, 'updateDocument']);
-
-        // Get document details with all versions
-        Route::get('/{documentId}', [DocumentManagementController::class, 'getDocument']);
-
-        // Get document version URL (view/download)
-        Route::post('/version-url', [DocumentManagementController::class, 'getVersionUrl']);
 
         // List documents by organization
         Route::post('/list', [DocumentManagementController::class, 'listByOrganization']);
-
-        // Update document metadata (not file)
-        Route::put('/{documentId}/info', [DocumentManagementController::class, 'updateDocumentInfo']);
-
-        Route::get('/document/view/{documentId}', [DocumentManagementController::class, 'viewDocument']);
-
-        Route::post('/{documentId}/allVersion', [DocumentManagementController::class, 'getAllVersions']);
-        Route::post('/{documentId}/add-raci-document', [DocumentManagementController::class, 'addRaciDocument']);
+        Route::middleware('permission:Document.view')->group(function () {
+            // Get document details with all versions
+            Route::get('/{documentId}', [DocumentManagementController::class, 'getDocument']);
+            Route::get('/document/view/{documentId}', [DocumentManagementController::class, 'viewDocument']);
+            Route::post('/{documentId}/allVersion', [DocumentManagementController::class, 'getAllVersions']);
+        });
+        Route::middleware('permission:Document.create')->group(function () {
+            Route::post('/create', [DocumentManagementController::class, 'createDocument']);
+        });
+        Route::middleware('permission:Document.edit')->group(function () {
+            Route::post('/{documentId}/upload-version', [DocumentManagementController::class, 'updateDocument']);
+            Route::put('/{documentId}/info', [DocumentManagementController::class, 'updateDocumentInfo']);
+            Route::post('/{documentId}/add-raci-document', [DocumentManagementController::class, 'addRaciDocument']);
+        });
+        // Get document version URL (view/download)
+        Route::post('/version-url', [DocumentManagementController::class, 'getVersionUrl']);
     });
 
     Route::prefix('document-submission')->group(function () {
@@ -168,51 +178,78 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Get single submission detail
         Route::get('/{submissionId}', [DocumentSubmissionController::class, 'getSubmission']);
 
-        // Admin: Get all submissions (with filters)
-        Route::post('/list', [DocumentSubmissionController::class, 'listSubmissions']);
+        Route::middleware('permission:DocumentSubmission.view')->group(function () {
+            Route::post('/list', [DocumentSubmissionController::class, 'listSubmissions']);
+            Route::get('/pending/list', [DocumentSubmissionController::class, 'getPendingSubmissions']);
+            Route::get('/stats/summary', [DocumentSubmissionController::class, 'getSubmissionStats']);
+        });
 
-        // Admin: Get pending submissions
-        Route::get('/pending/list', [DocumentSubmissionController::class, 'getPendingSubmissions']);
-
-        // Admin: Approve submission
-        Route::put('/{submissionId}/approve', [DocumentSubmissionController::class, 'approveSubmission']);
-
-        // Admin: Decline submission
-        Route::put('/{submissionId}/decline', [DocumentSubmissionController::class, 'declineSubmission']);
-
-        // Get submission statistics
-        Route::get('/stats/summary', [DocumentSubmissionController::class, 'getSubmissionStats']);
+        // Admin functions - require edit permission
+        Route::middleware('permission:DocumentSubmission.edit')->group(function () {
+            Route::put('/{submissionId}/approve', [DocumentSubmissionController::class, 'approveSubmission']);
+            Route::put('/{submissionId}/decline', [DocumentSubmissionController::class, 'declineSubmission']);
+        });
     });
 
     Route::prefix('document-revision')->group(function () {
-        // Get revisions for a specific document
-        Route::get('/document/{documentManagementId}', [DocumentRevisionController::class, 'getDocumentRevisions']);
-
-        // User request revision
         Route::post('/document/{documentManagementId}/request', [DocumentRevisionController::class, 'requestRevision']);
-
-        // Get user's own revision requests
         Route::get('/my-revisions', [DocumentRevisionController::class, 'getMyRevisions']);
-
-        // Get single revision detail
         Route::get('/{revisionId}', [DocumentRevisionController::class, 'getRevision']);
+        Route::middleware('permission:DocumentRevision.view')->group(function () {
+            Route::get('/document/{documentManagementId}', [DocumentRevisionController::class, 'getDocumentRevisions']);
+            Route::post('/list', [DocumentRevisionController::class, 'listRevisions']);
+            Route::get('/pending/list', [DocumentRevisionController::class, 'getPendingRevisions']);
+            Route::get('/approved/list', [DocumentRevisionController::class, 'getApprovedRevisions']);
+            Route::get('/stats/summary', [DocumentRevisionController::class, 'getRevisionStats']);
+        });
+        Route::middleware('permission:DocumentRevision.edit')->group(function () {
+            Route::put('/{revisionId}/approve', [DocumentRevisionController::class, 'approveRevision']);
+            Route::put('/{revisionId}/decline', [DocumentRevisionController::class, 'declineRevision']);
+        });
+    });
 
-        // Admin: Get all revisions (with filters)
-        Route::post('/list', [DocumentRevisionController::class, 'listRevisions']);
+    // ========================================
+    // ROLE & PERMISSION MANAGEMENT
+    // ========================================
 
-        // Admin: Get pending revisions
-        Route::get('/pending/list', [DocumentRevisionController::class, 'getPendingRevisions']);
+    Route::prefix('roles')->group(function () {
+        // Get all roles with pagination
+        Route::get('/', [RoleController::class, 'index']);
 
-        // Admin: Get approved revisions ready for version update
-        Route::get('/approved/list', [DocumentRevisionController::class, 'getApprovedRevisions']);
+        // Get all roles without pagination
+        Route::get('/all', [RoleController::class, 'all']);
 
-        // Admin: Approve revision
-        Route::put('/{revisionId}/approve', [DocumentRevisionController::class, 'approveRevision']);
+        // Get all modules (for permission setup UI)
+        Route::get('/modules', [RoleController::class, 'getModules']);
 
-        // Admin: Decline revision
-        Route::put('/{revisionId}/decline', [DocumentRevisionController::class, 'declineRevision']);
+        // Get single role with permissions
+        Route::get('/{id}', [RoleController::class, 'show']);
 
-        // Get revision statistics
-        Route::get('/stats/summary', [DocumentRevisionController::class, 'getRevisionStats']);
+        // Get employee's current role and permissions
+        Route::get('/employee/{employeeId}', [RoleController::class, 'getEmployeeRole']);
+
+        // Create new role
+        Route::post('/', [RoleController::class, 'store'])
+            ->middleware('permission:Role.create');
+
+        // Update role (name, description, status)
+        Route::put('/{id}', [RoleController::class, 'update'])
+            ->middleware('permission:Role.edit');
+
+        // Update role permissions
+        Route::put('/{id}/permissions', [RoleController::class, 'updatePermissions'])
+            ->middleware('permission:Role.edit');
+
+        // Delete role (soft delete)
+        Route::delete('/{id}', [RoleController::class, 'destroy'])
+            ->middleware('permission:Role.delete');
+
+        // Assign role to employee
+        Route::post('/assign', [RoleController::class, 'assignToEmployee'])
+            ->middleware('permission:Role.edit');
+
+        // Remove role from employee
+        Route::delete('/unassign/{employeeId}', [RoleController::class, 'unassignFromEmployee'])
+            ->middleware('permission:Role.edit');
     });
 });

@@ -7,7 +7,9 @@ use App\Models\User;
 use App\Models\LoginLog;
 use App\Models\LoginCheck;
 use App\Models\AuditLog;
+use App\Models\Employee;
 use App\Services\OTPService;
+use App\Services\PermissionService;
 use App\Helpers\JWTHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -20,11 +22,12 @@ use Carbon\Carbon;
  */
 class AuthController extends Controller
 {
-    protected $otpService;
+    protected $otpService, $permissionService;
 
-    public function __construct(OTPService $otpService)
+    public function __construct(OTPService $otpService, PermissionService $permissionService)
     {
         $this->otpService = $otpService;
+        $this->peermissionService = $permissionService;
     }
 
     /**
@@ -70,7 +73,7 @@ class AuthController extends Controller
         $loginCheck = $user->loginCheck;
 
         // Check password
-        if (!Hash::check($request->Password.$loginCheck->Salt, $user->Password)) {
+        if (!Hash::check($request->Password . $loginCheck->Salt, $user->Password)) {
             // Increment login attempt counter
             $this->incrementLoginAttempt($user->UserID);
 
@@ -155,6 +158,13 @@ class AuthController extends Controller
         );
         $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
 
+        $employee = Employee::where('EmployeeID', $user->UserID)->first();
+        $permissions = [];
+
+        if ($employee) {
+            $permissions = $this->permissionService->getEmployeePermissions($employee->EmployeeID);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Login successful',
@@ -166,6 +176,7 @@ class AuthController extends Controller
                     'IsAdministrator' => $user->IsAdministrator,
                     'UTCCode' => $user->UTCCode
                 ],
+                'permissions' => $permissions,
                 'access_token' => $accessToken,
                 'refresh_token' => $refreshToken,
                 'token_type' => 'Bearer',
@@ -249,6 +260,12 @@ class AuthController extends Controller
             $user->IsAdministrator
         );
         $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
+        $employee = Employee::where('EmployeeID', $user->UserID)->first();
+        $permissions = [];
+
+        if ($employee) {
+            $permissions = $this->permissionService->getEmployeePermissions($employee->EmployeeID);
+        }
 
         return response()->json([
             'success' => true,
@@ -261,6 +278,7 @@ class AuthController extends Controller
                     'IsAdministrator' => $user->IsAdministrator,
                     'UTCCode' => $user->UTCCode
                 ],
+                'permissions' => $permissions,
                 'access_token' => $accessToken,
                 'refresh_token' => $refreshToken,
                 'token_type' => 'Bearer',
@@ -347,7 +365,7 @@ class AuthController extends Controller
 
         // Create audit log
         AuditLog::create([
-            'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
+            'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
             'AtTimeStamp' => $timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U',
@@ -365,6 +383,14 @@ class AuthController extends Controller
         );
         $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
 
+        // Get employee permissions
+        $employee = Employee::where('EmployeeID', $user->UserID)->first();
+        $permissions = [];
+
+        if ($employee) {
+            $permissions = $this->permissionService->getEmployeePermissions($employee->EmployeeID);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Password changed successfully',
@@ -376,6 +402,7 @@ class AuthController extends Controller
                     'IsAdministrator' => $user->IsAdministrator,
                     'UTCCode' => $user->UTCCode
                 ],
+                'permissions' => $permissions,
                 'access_token' => $accessToken,
                 'refresh_token' => $refreshToken,
                 'token_type' => 'Bearer',
@@ -433,7 +460,7 @@ class AuthController extends Controller
 
         // Create audit log
         AuditLog::create([
-            'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
+            'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
             'AtTimeStamp' => Carbon::now()->timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U',
@@ -517,7 +544,7 @@ class AuthController extends Controller
 
         // Create audit log
         AuditLog::create([
-            'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
+            'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
             'AtTimeStamp' => $timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U',
@@ -596,7 +623,7 @@ class AuthController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => Carbon::now()->timestamp,
                 'ByUserID' => $userId,
                 'OperationCode' => 'U',
@@ -606,10 +633,18 @@ class AuthController extends Controller
                 'Note' => 'User refreshed access token'
             ]);
 
+            $employee = Employee::where('EmployeeID', $userId)->first();
+            $permissions = [];
+
+            if ($employee) {
+                $permissions = $this->permissionService->getEmployeePermissions($employee->EmployeeID);
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Token refreshed successfully',
                 'data' => [
+                    'permissions' => $permissions,
                     'access_token' => $accessToken,
                     'refresh_token' => $refreshToken,
                     'token_type' => 'Bearer',
@@ -649,7 +684,7 @@ class AuthController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => Carbon::now()->timestamp,
                 'ByUserID' => $userId,
                 'OperationCode' => 'U',
@@ -677,7 +712,7 @@ class AuthController extends Controller
     private function logLogin($userId, $isSuccessful, $request)
     {
         LoginLog::create([
-            'LoginLogID' => Carbon::now()->timestamp.random_numbersu(5),
+            'LoginLogID' => Carbon::now()->timestamp . random_numbersu(5),
             'UserID' => $userId,
             'IsSuccessful' => $isSuccessful,
             'LoginTimeStamp' => Carbon::now()->timestamp,
