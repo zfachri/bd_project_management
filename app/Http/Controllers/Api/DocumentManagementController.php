@@ -837,6 +837,12 @@ class DocumentManagementController extends Controller
             'document_type' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'notes' => 'nullable|string',
+
+                    // Document Roles update
+        'access_organization_ids' => 'nullable|array',
+        'access_organization_ids.*' => 'integer|exists:Organization,OrganizationID',
+        'is_download' => 'nullable|boolean',
+        'is_comment' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -854,7 +860,7 @@ class DocumentManagementController extends Controller
             // $authUserId = $request->user()->UserID ?? $request->user()->id;
             $timestamp = Carbon::now()->timestamp;
 
-            $document = DocumentManagement::findOrFail($documentId);
+            $document = DocumentManagement::with('documentRoles')->findOrFail($documentId);
             $oldData = $document->toArray();
 
             $updateData = array_filter([
@@ -868,9 +874,85 @@ class DocumentManagementController extends Controller
 
             $document->update($updateData);
 
-            // Create audit log
+            // Update DocumentRole if access_organization_ids is provided
+        if ($request->has('access_organization_ids')) {
+            $accessOrgIds = $request->input('access_organization_ids');
+            $ownerOrgId = $document->OrganizationID;
+
+            // VALIDASI: Owner organization HARUS ada dalam access_organization_ids
+            if (!in_array($ownerOrgId, $accessOrgIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Owner organization cannot be removed from document access',
+                    'errors' => [
+                        'access_organization_ids' => [
+                            "Owner organization (ID: {$ownerOrgId}) must be included in access list"
+                        ]
+                    ],
+                    'owner_organization_id' => $ownerOrgId
+                ], 422);
+            }
+
+            // Backup old DocumentRoles for audit log
+            $oldDocumentRoles = $document->documentRoles->map(function ($role) {
+                return [
+                    'DocumentRoleID' => $role->DocumentRoleID,
+                    'OrganizationID' => $role->OrganizationID,
+                    'IsDownload' => $role->IsDownload,
+                    'IsComment' => $role->IsComment,
+                ];
+            })->toArray();
+
+            // DELETE all existing DocumentRoles
+            DocumentRole::where('DocumentManagementID', $documentId)->delete();
+
+            // CREATE new DocumentRoles based on access_organization_ids
+            $isDownload = $request->input('is_download', true);
+            $isComment = $request->input('is_comment', true);
+            $newDocumentRoles = [];
+
+            foreach ($accessOrgIds as $orgId) {
+                $role = DocumentRole::create([
+                    'DocumentRoleID' => Carbon::now()->timestamp . random_numbersu(5),
+                    'DocumentManagementID' => $documentId,
+                    'OrganizationID' => $orgId,
+                    'IsDownload' => $isDownload,
+                    'IsComment' => $isComment,
+                ]);
+
+                $newDocumentRoles[] = [
+                    'DocumentRoleID' => $role->DocumentRoleID,
+                    'OrganizationID' => $role->OrganizationID,
+                    'IsDownload' => $role->IsDownload,
+                    'IsComment' => $role->IsComment,
+                ];
+
+                // Small delay to ensure unique DocumentRoleID
+                usleep(1000); // 1ms delay
+            }
+            // Create audit log for DocumentRole changes
             AuditLog::create([
                 'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+                'ReferenceTable' => 'DocumentRole',
+                'ReferenceRecordID' => $documentId,
+                'Data' => json_encode([
+                    'DocumentManagementID' => $documentId,
+                    'DocumentName' => $document->DocumentName,
+                    'OldDocumentRoles' => $oldDocumentRoles,
+                    'NewDocumentRoles' => $newDocumentRoles,
+                ]),
+                'Note' => 'Document access roles updated'
+            ]);
+        }
+
+
+             // Create audit log for document metadata update
+        if (!empty($updateData)) {
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5) + 1,
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -882,8 +964,14 @@ class DocumentManagementController extends Controller
                 ]),
                 'Note' => 'Document metadata updated'
             ]);
-
+        }
             DB::commit();
+
+            $document = DocumentManagement::with([
+            'documentRoles.organization',
+            'organization',
+            'user'
+        ])->find($documentId);
 
             return response()->json([
                 'success' => true,

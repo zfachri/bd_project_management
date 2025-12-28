@@ -102,7 +102,7 @@ class UserController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'FullName' => 'required|string|max:100',
-            'Email' => 'required|email|max:100|unique:user,Email',
+            'Email' => 'required|email|max:100|unique:User,Email',
             'Password' => 'required|string|min:6',
             'UTCCode' => 'nullable|string|max:6',
         ]);
@@ -122,6 +122,7 @@ class UserController extends Controller
 
             // Create user with IsAdministrator = 1
             $user = User::create([
+                'UserID' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',

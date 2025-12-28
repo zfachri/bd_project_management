@@ -116,13 +116,22 @@ class OTPService
     public function sendOTPEmail($user, $purpose = 'login')
     {
         $otpData = $this->createOTP($user->UserID, '02');
-        
-        Mail::to($user->Email)->send(new OTPMail(
-            $user->FullName,
-            $otpData['otp_code'],
-            $otpData['expires_in'],
-            $purpose
-        ));
+        try {
+                Mail::to($user->Email)->send(new OTPMail(
+                    $user->FullName,
+                    $otpData['otp_code'],
+                    $otpData['expires_in'],
+                    $purpose
+                ));
+        } catch(\Exception $e) {
+            \Log::error('Failed to send OTP email: ' . $e->getMessage());
+    
+    return [
+        'success' => false,
+        'message' => 'Failed to send OTP email',
+        'error' => $e->getMessage()
+    ];
+        }
 
         return [
             'success' => true,

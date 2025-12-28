@@ -27,7 +27,7 @@ class AuthController extends Controller
     public function __construct(OTPService $otpService, PermissionService $permissionService)
     {
         $this->otpService = $otpService;
-        $this->peermissionService = $permissionService;
+        $this->permissionService = $permissionService;
     }
 
     /**
@@ -534,12 +534,13 @@ class AuthController extends Controller
             'AtTimeStamp' => $timestamp,
             'ByUserID' => $user->UserID,
             'OperationCode' => 'U'
-        ]);
+        ]); 
 
         // Update login check - reset IsChangePassword flag
         $user->loginCheck->update([
             'IsChangePassword' => false,
-            'Salt' => $salt
+            'Salt' => $salt,
+            'UserStatusCode' => 99
         ]);
 
         // Create audit log
