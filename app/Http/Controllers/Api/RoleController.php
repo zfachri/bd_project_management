@@ -367,39 +367,80 @@ class RoleController extends Controller
             $timestamp = Carbon::now()->timestamp;
             $authUserId = $request->auth_user_id;
 
+            /** 🔹 1. Ambil permission existing */
+            $existing = Permission::where('RoleID', $id)
+                ->where('IsDelete', false)
+                ->get()
+                ->keyBy('ModuleID');
+
             // Soft delete existing permissions
-            Permission::where('RoleID', $id)->update([
-                'AtTimeStamp' => $timestamp,
-                'ByUserID' => $authUserId,
-                'OperationCode' => 'U',
-                'IsDelete' => true
-            ]);
+            // Permission::where('RoleID', $id)->update([
+            //     'AtTimeStamp' => $timestamp,
+            //     'ByUserID' => $authUserId,
+            //     'OperationCode' => 'U',
+            //     'IsDelete' => true
+            // ]);
 
-            // Create new permissions
-            foreach ($request->Permissions as $permissionData) {
-                $permissionId = Carbon::now()->timestamp . random_numbersu(5);
-
-                Permission::create([
-                    'PermissionID' => $permissionId,
+            foreach ($request->Permissions as $perm) {
+                $data = [
                     'AtTimeStamp' => $timestamp,
                     'ByUserID' => $authUserId,
-                    'OperationCode' => 'I',
-                    'RoleID' => $id,
-                    'ModuleID' => $permissionData['ModuleID'],
-                    'CanCreate' => $permissionData['CanCreate'] ?? false,
-                    'CanView' => $permissionData['CanView'] ?? false,
-                    'CanEdit' => $permissionData['CanEdit'] ?? false,
-                    'CanDelete' => $permissionData['CanDelete'] ?? false,
-                    'CanAccessSubordinates' => $permissionData['CanAccessSubordinates'] ?? false,
-                    'CanAccessParentOrg' => $permissionData['CanAccessParentOrg'] ?? false,
-                    'CanAccessChildOrg' => $permissionData['CanAccessChildOrg'] ?? false,
-                    'Scope' => $permissionData['Scope'] ?? 'own',
-                    'IsDelete' => false,
-                ]);
+                    'OperationCode' => 'U',
+                    'CanCreate' => $perm['CanCreate'] ?? false,
+                    'CanView' => $perm['CanView'] ?? false,
+                    'CanEdit' => $perm['CanEdit'] ?? false,
+                    'CanDelete' => $perm['CanDelete'] ?? false,
+                    'CanAccessSubordinates' => $perm['CanAccessSubordinates'] ?? false,
+                    'CanAccessParentOrg' => $perm['CanAccessParentOrg'] ?? false,
+                    'CanAccessChildOrg' => $perm['CanAccessChildOrg'] ?? false,
+                    'Scope' => $perm['Scope'] ?? 'own',
+                ];
+
+                if ($existing->has($perm['ModuleID'])) {
+                    // UPDATE
+                    $existing[$perm['ModuleID']]->update($data);
+                } else {
+                    // INSERT
+                    Permission::create(array_merge($data, [
+                        'PermissionID' => $timestamp . random_numbersu(5),
+                        'OperationCode' => 'I',
+                        'RoleID' => $id,
+                        'ModuleID' => $perm['ModuleID'],
+                        'IsDelete' => false,
+                    ]));
+                }
             }
 
+            // Create new permissions
+            // foreach ($request->Permissions as $permissionData) {
+            //     $permissionId = Carbon::now()->timestamp . random_numbersu(5);
+
+            //     Permission::create([
+            //         'PermissionID' => $permissionId,
+            //         'AtTimeStamp' => $timestamp,
+            //         'ByUserID' => $authUserId,
+            //         'OperationCode' => 'I',
+            //         'RoleID' => $id,
+            //         'ModuleID' => $permissionData['ModuleID'],
+            //         'CanCreate' => $permissionData['CanCreate'] ?? false,
+            //         'CanView' => $permissionData['CanView'] ?? false,
+            //         'CanEdit' => $permissionData['CanEdit'] ?? false,
+            //         'CanDelete' => $permissionData['CanDelete'] ?? false,
+            //         'CanAccessSubordinates' => $permissionData['CanAccessSubordinates'] ?? false,
+            //         'CanAccessParentOrg' => $permissionData['CanAccessParentOrg'] ?? false,
+            //         'CanAccessChildOrg' => $permissionData['CanAccessChildOrg'] ?? false,
+            //         'Scope' => $permissionData['Scope'] ?? 'own',
+            //         'IsDelete' => false,
+            //     ]);
+            // }
+
             // Clear cache for all employees with this role
-            $employeeRoles = EmployeeRole::where('RoleID', $id)->active()->get();
+            $employeeRoles = EmployeeRole::where('RoleID', $id)->active()
+                ->pluck('EmployeeID')
+                ->each(
+                    fn($empId) =>
+                    $this->permissionService->clearCache($empId)
+                );
             foreach ($employeeRoles as $empRole) {
                 $this->permissionService->clearCache($empRole->EmployeeID);
             }
@@ -413,7 +454,8 @@ class RoleController extends Controller
                 'ReferenceTable' => 'Role',
                 'ReferenceRecordID' => $id,
                 'Data' => json_encode([
-                    'PermissionsCount' => count($request->Permissions),
+                    // 'PermissionsCount' => count($request->Permissions),
+                    'updated_modules' => collect($request->Permissions)->pluck('ModuleID')
                 ]),
                 'Note' => 'Role permissions updated'
             ]);
@@ -704,6 +746,58 @@ class RoleController extends Controller
             'success' => true,
             'message' => 'Employee role retrieved successfully',
             'data' => $permissionDetails
+        ], 200);
+    }
+
+    public function deletePermission(Request $request, $roleId, $moduleId)
+    {
+        $permission = Permission::where('RoleID', $roleId)
+            ->where('ModuleID', $moduleId)
+            ->where('IsDelete', false)
+            ->first();
+
+        if (!$permission) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Permission not found'
+            ], 404);
+        }
+
+        // 🔒 Optional safety
+        if (EmployeeRole::where('RoleID', $roleId)->active()->exists()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete permission. Role is assigned to active employees.'
+            ], 400);
+        }
+
+        $timestamp  = now()->timestamp;
+        $authUserId = $request->auth_user_id;
+
+        $permission->update([
+            'AtTimeStamp' => $timestamp,
+            'ByUserID' => $authUserId,
+            'OperationCode' => 'D',
+            'IsDelete' => true
+        ]);
+
+        AuditLog::create([
+            'AuditLogID' => $timestamp . random_numbersu(5),
+            'AtTimeStamp' => $timestamp,
+            'ByUserID' => $authUserId,
+            'OperationCode' => 'D',
+            'ReferenceTable' => 'Permission',
+            'ReferenceRecordID' => $permission->PermissionID,
+            'Data' => json_encode([
+                'RoleID' => $roleId,
+                'ModuleID' => $moduleId
+            ]),
+            'Note' => 'Permission deleted from role'
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Permission deleted successfully'
         ], 200);
     }
 }

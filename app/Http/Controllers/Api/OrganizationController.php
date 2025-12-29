@@ -12,26 +12,91 @@ use Carbon\Carbon;
 class OrganizationController extends Controller
 {
     /**
+     * Get accessible organization IDs for user
+     */
+    private function getAccessibleOrganizationIds($user)
+    {
+        // Admin bisa akses semua
+        if ($user->IsAdministrator) {
+            return Organization::active()->pluck('OrganizationID')->toArray();
+        }
+        
+        $userOrgId = $user->OrganizationID;
+        $accessibleIds = [$userOrgId]; // Selalu bisa akses org sendiri
+
+        // Get all descendants
+        $descendants = $this->getAllDescendants($userOrgId);
+        $accessibleIds = array_merge($accessibleIds, $descendants);
+
+        return $accessibleIds;
+    }
+
+    /**
+     * Get all descendant organization IDs
+     */
+    private function getAllDescendants($orgId, &$result = [])
+    {
+        $children = Organization::where('ParentOrganizationID', $orgId)
+            ->where('OrganizationID', '!=', $orgId) // Exclude self-reference
+            ->where('IsDelete', false)
+            ->pluck('OrganizationID')
+            ->toArray();
+
+        foreach ($children as $childId) {
+            if (!in_array($childId, $result)) {
+                $result[] = $childId;
+                $this->getAllDescendants($childId, $result);
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Check if user has access to specific organization
+     */
+    private function checkOrganizationAccess($user, $orgId)
+    {
+        if ($user->IsAdministrator) {
+            return true;
+        }
+
+        $accessibleIds = $this->getAccessibleOrganizationIds($user);
+        return in_array($orgId, $accessibleIds);
+    }
+
+    /**
      * Get all organizations (with hierarchy)
      */
     public function index(Request $request)
     {
+        $user = $request->auth_user;
         $perPage = $request->input('per_page', 15);
         $search = $request->input('search');
         $withHierarchy = $request->input('with_hierarchy', false);
 
-        $query = Organization::active();
+        $accessibleIds = $this->getAccessibleOrganizationIds($user);
+
+        $query = Organization::active()->whereIn('OrganizationID', $accessibleIds);
 
         if ($search) {
             $query->where('OrganizationName', 'like', "%{$search}%");
         }
 
         if ($withHierarchy) {
-            // Get only root organizations with their children
-            $organizations = Organization::active()
-                ->whereNull('ParentOrganizationID')
-                ->with('children')
+            // Get hierarchy filtered by accessible IDs
+            $getOrg = Organization::active()
+                ->whereIn('OrganizationID', $accessibleIds)
+                ->orderBy('LevelNo')
+                ->orderBy('OrganizationName')
                 ->get();
+
+            $organizations = $this->buildAccessibleHierarchy($getOrg, $user->OrganizationID, $user->IsAdministrator);
+            // Get only root organizations with their children
+            // $organizations = Organization::active()
+            //     ->whereNull('ParentOrganizationID')
+            //     ->with('children')
+            //     ->get();
 
             return response()->json([
                 'success' => true,
@@ -42,7 +107,7 @@ class OrganizationController extends Controller
 
         $organizations = $query->with('parent')->paginate($perPage);
 
-        $organizations->getCollection()->transform(function($org) {
+        $organizations->getCollection()->transform(function ($org) {
             return [
                 'OrganizationID' => $org->OrganizationID,
                 'ParentOrganizationID' => $org->ParentOrganizationID,
@@ -63,17 +128,57 @@ class OrganizationController extends Controller
     }
 
     /**
+     * Build accessible hierarchy
+     */
+    private function buildAccessibleHierarchy($organizations, $userOrgId, $isAdmin = false)
+    {
+        // =========================
+        // ADMIN: TAMPILKAN SEMUA ROOT
+        // =========================
+        if ($isAdmin) {
+            return $this->buildHierarchy($organizations, null);
+        }
+
+        // =========================
+        // EMPLOYEE: ROOT = ORG SENDIRI
+        // =========================
+        $userOrg = $organizations->firstWhere('OrganizationID', $userOrgId);
+
+        if (!$userOrg) {
+            return [];
+        }
+
+        return [[
+            'OrganizationID' => $userOrg->OrganizationID,
+            'OrganizationName' => $userOrg->OrganizationName,
+            'LevelNo' => $userOrg->LevelNo,
+            'IsActive' => $userOrg->IsActive,
+            'Child' => $this->buildHierarchy($organizations, $userOrgId)
+        ]];
+    }
+
+    /**
      * Get all organizations without pagination
      */
     public function all(Request $request)
     {
+        $user = $request->auth_user;
         $withHierarchy = $request->input('with_hierarchy', false);
 
+        $accessibleIds = $this->getAccessibleOrganizationIds($user);
+
         if ($withHierarchy) {
-            $organizations = Organization::active()
-                ->whereNull('ParentOrganizationID')
-                ->with('children')
+            $getOrg = Organization::active()
+                ->whereIn('OrganizationID', $accessibleIds)
+                ->orderBy('LevelNo')
+                ->orderBy('OrganizationName')
                 ->get();
+
+            $organizations = $this->buildAccessibleHierarchy($getOrg, $user->OrganizationID, $user->IsAdministrator);
+            // $organizations = Organization::active()
+            //     ->whereNull('ParentOrganizationID')
+            //     ->with('children')
+            //     ->get();
         } else {
             $organizations = Organization::active()->get();
         }
@@ -88,8 +193,16 @@ class OrganizationController extends Controller
     /**
      * Get single organization
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
+        $user = $request->auth_user;
+        // Check access
+        if (!$this->checkOrganizationAccess($user, $id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have access to this organization'
+            ], 403);
+        }
         $organization = Organization::with(['parent', 'children'])->find($id);
 
         if (!$organization) {
@@ -98,6 +211,11 @@ class OrganizationController extends Controller
                 'message' => 'Organization not found'
             ], 404);
         }
+
+        // $accessibleIds = $this->getAccessibleOrganizationIds($user);
+        // $filteredChildren = $organization->children->filter(function($child) use ($accessibleIds) {
+        //     return in_array($child->OrganizationID, $accessibleIds);
+        // })->values();
 
         return response()->json([
             'success' => true,
@@ -120,10 +238,14 @@ class OrganizationController extends Controller
     /**
      * Get organizations by level
      */
-    public function getByLevel($level)
+    public function getByLevel(Request $request, $level)
     {
+        $user = $request->auth_user;
+        $accessibleIds = $this->getAccessibleOrganizationIds($user);
+
         $organizations = Organization::active()
             ->where('LevelNo', $level)
+            ->whereIn('OrganizationID', $accessibleIds)
             ->get();
 
         return response()->json([
@@ -136,8 +258,18 @@ class OrganizationController extends Controller
     /**
      * Get children of organization
      */
-    public function getChildren($id)
+    public function getChildren(Request $request, $id)
     {
+        $user = $request->auth_user;
+
+        // Check access to parent organization
+        if (!$this->checkOrganizationAccess($user, $id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have access to this organization'
+            ], 403);
+        }
+
         $organization = Organization::find($id);
 
         if (!$organization) {
@@ -146,9 +278,12 @@ class OrganizationController extends Controller
                 'message' => 'Organization not found'
             ], 404);
         }
+        $accessibleIds = $this->getAccessibleOrganizationIds($user);
 
         $children = Organization::active()
             ->where('ParentOrganizationID', $id)
+            ->where('OrganizationID', '!=', $id) // Exclude self-reference
+            ->whereIn('OrganizationID', $accessibleIds)
             ->get();
 
         return response()->json([
@@ -163,6 +298,8 @@ class OrganizationController extends Controller
      */
     public function store(Request $request)
     {
+        $user = $request->auth_user;
+
         $validator = Validator::make($request->all(), [
             'ParentOrganizationID' => 'nullable|integer|exists:Organization,OrganizationID',
             'OrganizationName' => 'required|string|max:100',
@@ -174,6 +311,22 @@ class OrganizationController extends Controller
                 'message' => 'Validation error',
                 'errors' => $validator->errors()
             ], 422);
+        }
+
+        // Check if user can create under parent organization
+        if ($request->ParentOrganizationID) {
+            if (!$this->checkOrganizationAccess($user, $request->ParentOrganizationID)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to create organization under this parent'
+                ], 403);
+            }
+        } elseif (!$user->IsAdministrator) {
+            // Only admin can create root organization
+            return response()->json([
+                'success' => false,
+                'message' => 'Only administrators can create root organizations'
+            ], 403);
         }
 
         try {
@@ -189,7 +342,7 @@ class OrganizationController extends Controller
                 $levelNo = $parent->LevelNo + 1;
                 $isChild = true;
             }
-            $nilai = Carbon::now()->timestamp.random_numbersu(5);
+            $nilai = Carbon::now()->timestamp . random_numbersu(5);
             $organization = Organization::create([
                 'OrganizationID' => $nilai,
                 'AtTimeStamp' => $timestamp,
@@ -210,7 +363,7 @@ class OrganizationController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLog'=> Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -229,7 +382,6 @@ class OrganizationController extends Controller
                 'message' => 'Organization created successfully',
                 'data' => $organization
             ], 201);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -244,6 +396,22 @@ class OrganizationController extends Controller
      */
     public function update(Request $request, $id)
     {
+        $user = $request->auth_user;
+
+        // Check access
+        // if (!$this->checkOrganizationAccess($user, $id)) {
+        //     return response()->json([
+        //         'success' => false,
+        //         'message' => 'You do not have access to update this organization'
+        //     ], 403);
+        // }
+        if (!$user->IsAdministrator) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only administrators can update organizations'
+            ], 403);
+        }
+
         $organization = Organization::find($id);
 
         if (!$organization) {
@@ -290,7 +458,7 @@ class OrganizationController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLog'=> Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -311,7 +479,6 @@ class OrganizationController extends Controller
                 'message' => 'Organization updated successfully',
                 'data' => $organization
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -326,6 +493,22 @@ class OrganizationController extends Controller
      */
     public function destroy(Request $request, $id)
     {
+        $user = $request->auth_user;
+
+        // Check access
+        // if (!$this->checkOrganizationAccess($user, $id)) {
+        //     return response()->json([
+        //         'success' => false,
+        //         'message' => 'You do not have access to delete this organization'
+        //     ], 403);
+        // }
+        if (!$user->IsAdministrator) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only administrators can delete organizations'
+            ], 403);
+        }
+
         $organization = Organization::find($id);
 
         if (!$organization) {
@@ -361,7 +544,7 @@ class OrganizationController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLog'=> Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'D',
@@ -377,7 +560,6 @@ class OrganizationController extends Controller
                 'success' => true,
                 'message' => 'Organization deleted successfully'
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -392,6 +574,23 @@ class OrganizationController extends Controller
      */
     public function toggleActive(Request $request, $id)
     {
+        $user = $request->auth_user;
+
+        // Check access
+        // if (!$this->checkOrganizationAccess($user, $id)) {
+        //     return response()->json([
+        //         'success' => false,
+        //         'message' => 'You do not have access to modify this organization'
+        //     ], 403);
+        // }
+
+        if (!$user->IsAdministrator) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only administrators can toggle organizations status'
+            ], 403);
+        }
+
         $organization = Organization::find($id);
 
         if (!$organization) {
@@ -418,7 +617,7 @@ class OrganizationController extends Controller
 
             // Create audit log
             AuditLog::create([
-                'AuditLog'=> Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLog' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -440,7 +639,6 @@ class OrganizationController extends Controller
                     'IsActive' => $organization->IsActive,
                 ]
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -450,15 +648,20 @@ class OrganizationController extends Controller
         }
     }
 
-        /**
+    /**
      * Get organization hierarchy structure
      * Returns organizations in nested format with children
      */
     public function getHierarchy(Request $request)
     {
+        $user = $request->auth_user;
+
         try {
+            $accessibleIds = $this->getAccessibleOrganizationIds($user);
+
             $organizations = Organization::where('IsActive', true)
                 ->where('IsDelete', false)
+                ->whereIn('OrganizationID', $accessibleIds)
                 ->select([
                     'OrganizationID',
                     'ParentOrganizationID',
@@ -472,22 +675,23 @@ class OrganizationController extends Controller
                 ->orderBy('OrganizationName')
                 ->get();
 
-                \Log::info('Total Organizations: ' . $organizations->count());
-                \Log::info('Root Organizations (ParentOrganizationID = OrganizationID): ' . 
-                $organizations->filter(function($org) {
-                    return $org->ParentOrganizationID == $org->OrganizationID;
-                })->count()
+            \Log::info('Total Organizations: ' . $organizations->count());
+            \Log::info(
+                'Root Organizations (ParentOrganizationID = OrganizationID): ' .
+                    $organizations->filter(function ($org) {
+                        return $org->ParentOrganizationID == $org->OrganizationID;
+                    })->count()
             );
 
+            $hierarchy = $this->buildAccessibleHierarchy($organizations, $user->OrganizationID, $user->IsAdministrator);
             // Build hierarchy tree
-            $hierarchy = $this->buildHierarchy($organizations);
+            // $hierarchy = $this->buildHierarchy($organizations);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Organization hierarchy retrieved successfully',
                 'data' => $hierarchy
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -509,9 +713,9 @@ class OrganizationController extends Controller
             if ($parentId === null) {
                 // Root organization: ParentOrganizationID sama dengan OrganizationID
                 if ($organization->ParentOrganizationID == $organization->OrganizationID) {
-                    
+
                     $children = $this->buildHierarchy($organizations, $organization->OrganizationID);
-                    
+
                     $branch[] = [
                         'OrganizationID' => $organization->OrganizationID,
                         'OrganizationName' => $organization->OrganizationName,
@@ -523,11 +727,13 @@ class OrganizationController extends Controller
             } else {
                 // For child organizations: ParentOrganizationID sama dengan $parentId
                 // tapi OrganizationID tidak sama dengan ParentOrganizationID (bukan root)
-                if ($organization->ParentOrganizationID == $parentId && 
-                    $organization->OrganizationID != $organization->ParentOrganizationID) {
-                    
+                if (
+                    $organization->ParentOrganizationID == $parentId &&
+                    $organization->OrganizationID != $organization->ParentOrganizationID
+                ) {
+
                     $children = $this->buildHierarchy($organizations, $organization->OrganizationID);
-                    
+
                     $branch[] = [
                         'OrganizationID' => $organization->OrganizationID,
                         'OrganizationName' => $organization->OrganizationName,
@@ -547,6 +753,16 @@ class OrganizationController extends Controller
      */
     public function getHierarchyFrom(Request $request, $id)
     {
+        $user = $request->auth_user;
+
+        // Check access
+        if (!$this->checkOrganizationAccess($user, $id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have access to this organization'
+            ], 403);
+        }
+
         try {
             $organization = Organization::find($id);
 
@@ -557,9 +773,12 @@ class OrganizationController extends Controller
                 ], 404);
             }
 
+            $accessibleIds = $this->getAccessibleOrganizationIds($user);
+
             // Get all descendants
             $organizations = Organization::where('IsActive', true)
                 ->where('IsDelete', false)
+                ->whereIn('OrganizationID', $accessibleIds)
                 ->select([
                     'OrganizationID',
                     'ParentOrganizationID',
@@ -581,7 +800,6 @@ class OrganizationController extends Controller
                 'message' => 'Organization hierarchy retrieved successfully',
                 'data' => $hierarchy
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -597,7 +815,7 @@ class OrganizationController extends Controller
     private function buildHierarchyFrom($organizations, $rootId)
     {
         $root = $organizations->firstWhere('OrganizationID', $rootId);
-        
+
         if (!$root) {
             return null;
         }

@@ -33,6 +33,7 @@ class JWTMiddleware
                     'message' => 'Invalid token type. Use access token.'
                 ], 401);
             }
+            $data = $decoded['data'] ?? [];
 
             // Get user
             $user = User::find($decoded['sub']);
@@ -54,16 +55,34 @@ class JWTMiddleware
 
             // Add user to request
             unset($user->password);
-            $request->merge(['auth_user' => $user]);
-            $request->merge(['auth_user_id' => $user->UserID]);
+            $authUser =(object) [
+                'UserID' => $data->UserID ?? null,
+                'Email' => $data->Email ?? null,
+                'IsAdministrator' => $data->IsAdministrator ?? false,
 
+                'EmployeeID' => $data->EmployeeID ?? null,
+                'OrganizationID' => $data->OrganizationID ?? null,
+                'PositionID' => $data->PositionID ?? null,
+                'RoleID' => $data->RoleID ?? null,
+            ];
+            // $request->attributes->set('auth_user_decoy', new AuthUser(
+            //     UserID: $data->UserID ?? null,
+            //     Email: $data->Email ?? null,
+            //     IsAdministrator: (bool) ($data->IsAdministrator ?? false),
+
+            //     EmployeeID: $data->EmployeeID ?? null,
+            //     OrganizationID: $data->OrganizationID ?? null,
+            //     PositionID: $data->PositionID ?? null,
+            //     RoleID: $data->RoleID ?? null,
+            // ));
+            $request->auth_user = $authUser;
+            $request->merge(['auth_user_id' => $user->UserID]);
             // Check if token needs refresh (3/4 of lifetime)
             if (JWTHelper::needsRefresh($token)) {
                 $request->merge(['token_needs_refresh' => true]);
             }
 
             return $next($request);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,

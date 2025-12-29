@@ -149,21 +149,53 @@ class AuthController extends Controller
 
         // Update last login timestamp
         $this->updateLastLogin($user->UserID, $request);
+        $permissions = [];
+        $context=[];
+        if (!$user->IsAdministrator) {
+            $employee = Employee::active()
+                ->with([
+                    'organization',
+                    'currentPosition.position',
+                    'employeeRole.role.permissions.module'
+                ])
+                ->where('EmployeeID', $user->UserID)
+                ->first();
+
+            if (!$employee) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Employee record not found'
+                ], 403);
+            }
+
+            $context = [
+                'EmployeeID'     => $employee->EmployeeID,
+                'OrganizationID' => $employee->OrganizationID,
+                'PositionID'     => optional($employee->currentPosition)->PositionID,
+                'RoleID'         => optional($employee->employeeRole)->RoleID,
+            ];
+
+            $permissions = $employee->getPermissions();
+
+            // $organization = $employee->organization;
+            // $position = optional($employee->currentPosition)->position;
+            // $role = optional($employee->employeeRole)->role;
+            // $permissions = $employee->getPermissions() ?? [];
+        }
 
         // Generate tokens
         $accessToken = JWTHelper::generateAccessToken(
             $user->UserID,
             $user->Email,
-            $user->IsAdministrator
+            $user->IsAdministrator,
+            $context
+
         );
         $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
 
-        $employee = Employee::where('EmployeeID', $user->UserID)->first();
-        $permissions = [];
-
-        if ($employee) {
-            $permissions = $this->permissionService->getEmployeePermissions($employee->EmployeeID);
-        }
+        // if ($employee) {
+        //     $permissions = $this->permissionService->getEmployeePermissions($employee->EmployeeID);
+        // }
 
         return response()->json([
             'success' => true,

@@ -25,7 +25,7 @@ class JWTHelper
     /**
      * Generate Access Token
      */
-    public static function generateAccessToken($userId, $email, $isAdmin = false)
+    public static function generateAccessToken($userId, $email, $isAdmin = false, array $context=[] )
     {
         $expiresIn = config('jwt.access_token_expire', 3600); // 1 hour default
         $issuedAt = Carbon::now()->timestamp;
@@ -36,11 +36,11 @@ class JWTHelper
             'iat' => $issuedAt,
             'exp' => $expiration,
             'sub' => $userId,
-            'data' => [
+            'data' => array_merge([
                 "Email" => $email,
                 "UserID" => $userId,
                 "IsAdministrator" => $isAdmin
-            ],
+            ], $context),
             'type' => 'access'
         ];
 
