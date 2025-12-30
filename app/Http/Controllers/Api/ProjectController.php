@@ -17,6 +17,7 @@ use App\Models\ProjectExpenseFile;
 use App\Models\ProjectAssignMember;
 use App\Services\MinioService;
 use App\Models\AuditLog;
+use App\Models\MiniGoal;
 
 class ProjectController extends Controller
 {
@@ -27,7 +28,425 @@ class ProjectController extends Controller
         $this->minioService = $minioService;
     }
 
+    /**
+     * Create Project (Wizard)
+     */
     public function store(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            // Project Data
+            'project.ParentProjectID' => 'nullable|integer',
+            'project.LevelNo' => 'required|integer|in:1,2',
+            'project.IsChild' => 'required|boolean',
+            'project.ProjectCategoryID' => 'nullable|integer',
+            'project.ProjectDescription' => 'required|string',
+            'project.CurrencyCode' => 'nullable|string|max:3',
+            'project.BudgetAmount' => 'nullable|numeric',
+            'project.StartDate' => 'required|date',
+            'project.EndDate' => 'required|date|after_or_equal:project.StartDate',
+            'project.PriorityCode' => 'required|integer|in:1,2,3',
+
+            // Project Status
+            'status.ProjectStatusCode' => 'required|string|max:2|in:00,10,11,12,99',
+            'status.ProjectStatusReason' => 'nullable|string|max:200',
+
+            // Members (wajib minimal 1 owner)
+            'members' => 'required|array|min:1',
+            'members.*.UserID' => 'required|integer|exists:users,id',
+            'members.*.IsOwner' => 'required|boolean',
+            'members.*.Title' => 'nullable|string|max:200',
+
+            // MiniGoals (opsional)
+            'mini_goals' => 'nullable|array',
+            'mini_goals.*.SequenceNo' => 'nullable|integer',
+            'mini_goals.*.MiniGoalDescription' => 'required|string|max:200',
+            'mini_goals.*.MiniGoalCategoryCode' => 'required|in:1,2,3',
+            'mini_goals.*.TargetValue' => 'required|integer|min:0',
+            'mini_goals.*.ActualValue' => 'nullable|integer|min:0',
+
+            // Tasks (opsional)
+            'tasks' => 'nullable|array',
+            'tasks.*.ParentProjectTaskID' => 'nullable|integer',
+            'tasks.*.SequenceNo' => 'nullable|integer',
+            'tasks.*.PriorityCode' => 'required|integer|in:1,2,3',
+            'tasks.*.TaskDescription' => 'required|string|max:200',
+            'tasks.*.StartDate' => 'required|date',
+            'tasks.*.EndDate' => 'required|date|after_or_equal:tasks.*.StartDate',
+            'tasks.*.ProgressBar' => 'nullable|numeric|min:0|max:100',
+            'tasks.*.Note' => 'nullable|string',
+
+            // Task Files (opsional)
+            'tasks.*.files' => 'nullable|array',
+            'tasks.*.files.*.original_filename' => 'required|string|max:255',
+            'tasks.*.files.*.original_content_type' => 'required|string|max:100',
+            'tasks.*.files.*.original_file_size' => 'nullable|integer|min:1',
+            'tasks.*.files.*.has_converted_pdf' => 'required|boolean',
+            'tasks.*.files.*.converted_filename' => 'nullable|required_if:tasks.*.files.*.has_converted_pdf,true|string|max:255',
+            'tasks.*.files.*.converted_file_size' => 'nullable|integer|min:1',
+
+            // Task Assigned Members (opsional, based on UserID)
+            'tasks.*.assignedMembers' => 'nullable|array',
+            'tasks.*.assignedMembers.*' => 'integer|exists:users,id',
+
+            // Expenses (opsional)
+            'expenses' => 'nullable|array',
+            'expenses.*.ExpenseDate' => 'required|date',
+            'expenses.*.ExpenseNote' => 'required|string|max:200',
+            'expenses.*.CurrencyCode' => 'required|string|max:3',
+            'expenses.*.ExpenseAmount' => 'required|numeric',
+
+            // Expense Files (opsional)
+            'expenses.*.files' => 'nullable|array',
+            'expenses.*.files.*.original_filename' => 'required|string|max:255',
+            'expenses.*.files.*.original_content_type' => 'required|string|max:100',
+            'expenses.*.files.*.original_file_size' => 'nullable|integer|min:1',
+            'expenses.*.files.*.has_converted_pdf' => 'required|boolean',
+            'expenses.*.files.*.converted_filename' => 'nullable|required_if:expenses.*.files.*.has_converted_pdf,true|string|max:255',
+            'expenses.*.files.*.converted_file_size' => 'nullable|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        // Validasi: hanya boleh ada SATU owner
+        $owners = collect($request->input('members'))->where('IsOwner', true);
+        if ($owners->count() !== 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Project must have exactly ONE owner'
+            ], 422);
+        }
+
+        // Validasi: user yang create harus jadi owner
+        $authUserId = $request->auth_user_id;
+        $isCreatorOwner = $owners->contains('UserID', $authUserId);
+        if (!$isCreatorOwner) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Project creator must be set as the owner'
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $timestamp = Carbon::now()->timestamp;
+
+            // 1. Create Project
+            $projectId = $timestamp . random_numbersu(5);
+            $project = Project::create([
+                'ProjectID' => $projectId,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'ParentProjectID' => $request->input('project.ParentProjectID'),
+                'LevelNo' => $request->input('project.LevelNo'),
+                'IsChild' => $request->input('project.IsChild'),
+                'ProjectCategoryID' => $request->input('project.ProjectCategoryID'),
+                'ProjectDescription' => $request->input('project.ProjectDescription'),
+                'CurrencyCode' => $request->input('project.CurrencyCode', 'IDR'),
+                'BudgetAmount' => $request->input('project.BudgetAmount', 0),
+                'IsDelete' => false,
+                'StartDate' => $request->input('project.StartDate'),
+                'EndDate' => $request->input('project.EndDate'),
+                'PriorityCode' => $request->input('project.PriorityCode'),
+            ]);
+
+            // 2. Create Project Status
+            ProjectStatus::create([
+                'ProjectID' => $projectId,
+                'ProjectStatusCode' => $request->input('status.ProjectStatusCode'),
+                'ProjectStatusReason' => $request->input('status.ProjectStatusReason'),
+                'TotalMember' => 0,
+                'TotalTaskPriority1' => 0,
+                'TotalTaskPriority2' => 0,
+                'TotalTaskPriority3' => 0,
+                'TotalTask' => 0,
+                'TotalTaskProgress1' => 0,
+                'TotalTaskProgress2' => 0,
+                'TotalTaskProgress3' => 0,
+                'TotalTaskChecked' => 0,
+                'TotalExpense' => 0,
+                'TotalExpenseChecked' => 0,
+                'AccumulatedExpense' => 0,
+                'LastTaskUpdateAtTimeStamp' => null,
+                'LastTaskUpdateByUserID' => null,
+                'LastExpenseUpdateAtTimeStamp' => null,
+                'LastExpenseUpdateByUserID' => null,
+            ]);
+
+            // 3. Create Project Members
+            $memberMap = []; // Map UserID => ProjectMemberID
+            $createdMembers = [];
+
+            foreach ($request->input('members') as $memberData) {
+                $memberTimestamp = Carbon::now()->timestamp;
+                $memberId = $memberTimestamp . random_numbersu(5);
+
+                $member = ProjectMember::create([
+                    'ProjectMemberID' => $memberId,
+                    'ProjectID' => $projectId,
+                    'AtTimeStamp' => $memberTimestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'I',
+                    'UserID' => $memberData['UserID'],
+                    'IsActive' => true,
+                    'IsOwner' => $memberData['IsOwner'],
+                    'Title' => $memberData['Title'] ?? null,
+                ]);
+
+                $memberMap[$memberData['UserID']] = $memberId;
+
+                $createdMembers[] = [
+                    'ProjectMemberID' => $memberId,
+                    'UserID' => $memberData['UserID'],
+                    'IsOwner' => $memberData['IsOwner'],
+                    'Title' => $memberData['Title'] ?? null,
+                ];
+            }
+
+            // 4. Create MiniGoals (if any)
+            $createdMiniGoals = [];
+            if ($request->has('mini_goals') && !empty($request->input('mini_goals'))) {
+                foreach ($request->input('mini_goals') as $miniGoalData) {
+                    $miniGoalTimestamp = Carbon::now()->timestamp;
+                    $miniGoalId = $miniGoalTimestamp . random_numbersu(5);
+
+                    $miniGoal = MiniGoal::create([
+                        'MiniGoalID' => $miniGoalId,
+                        'AtTimeStamp' => $miniGoalTimestamp,
+                        'ByUserID' => $authUserId,
+                        'OperationCode' => 'I',
+                        'ProjectID' => $projectId,
+                        'SequenceNo' => $miniGoalData['SequenceNo'] ?? null,
+                        'MiniGoalDescription' => $miniGoalData['MiniGoalDescription'],
+                        'MiniGoalCategoryCode' => $miniGoalData['MiniGoalCategoryCode'],
+                        'TargetValue' => $miniGoalData['TargetValue'],
+                        'ActualValue' => $miniGoalData['ActualValue'] ?? 0,
+                        'IsDelete' => false,
+                    ]);
+
+                    $createdMiniGoals[] = [
+                        'MiniGoalID' => $miniGoalId,
+                        'MiniGoalDescription' => $miniGoalData['MiniGoalDescription'],
+                        'MiniGoalCategoryCode' => $miniGoalData['MiniGoalCategoryCode'],
+                        'TargetValue' => $miniGoalData['TargetValue'],
+                        'ActualValue' => $miniGoalData['ActualValue'] ?? 0,
+                    ];
+                }
+            }
+
+            // 5. Create Tasks (if any)
+            $createdTasks = [];
+            if ($request->has('tasks') && !empty($request->input('tasks'))) {
+                foreach ($request->input('tasks') as $taskIndex => $taskData) {
+                    $taskTimestamp = Carbon::now()->timestamp;
+                    $taskId = $taskTimestamp . random_numbersu(5);
+
+                    // Validate task dates are within project dates
+                    $dateValidation = $this->validateTaskDates(
+                        $projectId,
+                        $taskData['StartDate'],
+                        $taskData['EndDate']
+                    );
+
+                    if (!$dateValidation['valid']) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'message' => "Task #" . ($taskIndex + 1) . ": " . $dateValidation['message'],
+                        ], 422);
+                    }
+
+                    // Calculate ProgressCode based on ProgressBar
+                    $progressBar = $taskData['ProgressBar'] ?? 0;
+
+                    if ($progressBar >= 100) {
+                        $progressCode = 2; // COMPLETED
+                    } elseif ($progressBar > 0) {
+                        $progressCode = 1; // ON-PROGRESS
+                    } else {
+                        $progressCode = 0; // INITIAL
+                    }
+
+                    $task = ProjectTask::create([
+                        'ProjectTaskID' => $taskId,
+                        'AtTimeStamp' => $taskTimestamp,
+                        'ByUserID' => $authUserId,
+                        'OperationCode' => 'I',
+                        'ProjectID' => $projectId,
+                        'ParentProjectTaskID' => $taskData['ParentProjectTaskID'] ?? null,
+                        'SequenceNo' => $taskData['SequenceNo'] ?? null,
+                        'PriorityCode' => $taskData['PriorityCode'],
+                        'TaskDescription' => $taskData['TaskDescription'],
+                        'StartDate' => $taskData['StartDate'],
+                        'EndDate' => $taskData['EndDate'],
+                        'ProgressCode' => $progressCode,
+                        'ProgressBar' => $progressBar,
+                        'Note' => $taskData['Note'] ?? null,
+                        'IsDelete' => false,
+                        'IsCheck' => false,
+                    ]);
+
+                    $taskFileUrls = [];
+
+                    // 5a. Generate Presigned URLs for Task Files (if any)
+                    if (!empty($taskData['files'])) {
+                        foreach ($taskData['files'] as $fileData) {
+                            $fileResult = $this->handleTaskFileUpload(
+                                $projectId,
+                                $taskId,
+                                $fileData,
+                                $authUserId,
+                                $taskTimestamp
+                            );
+
+                            $taskFileUrls[] = $fileResult;
+                        }
+                    }
+
+                    // 5b. Assign Members to Task (if any) - based on UserID
+                    $assignedMembers = [];
+                    if (!empty($taskData['assignedMembers'])) {
+                        foreach ($taskData['assignedMembers'] as $assignedUserId) {
+                            if (isset($memberMap[$assignedUserId])) {
+                                $assignTimestamp = Carbon::now()->timestamp;
+                                $assignId = $assignTimestamp . random_numbersu(5);
+
+                                ProjectAssignMember::create([
+                                    'ProjectAssignMemberID' => $assignId,
+                                    'AtTimeStamp' => $assignTimestamp,
+                                    'ByUserID' => $authUserId,
+                                    'OperationCode' => 'I',
+                                    'ProjectMemberID' => $memberMap[$assignedUserId],
+                                    'ProjectTaskID' => $taskId,
+                                ]);
+
+                                $assignedMembers[] = [
+                                    'UserID' => $assignedUserId,
+                                    'ProjectMemberID' => $memberMap[$assignedUserId],
+                                ];
+                            }
+                        }
+                    }
+
+                    $createdTasks[] = [
+                        'ProjectTaskID' => $taskId,
+                        'TaskDescription' => $taskData['TaskDescription'],
+                        'PriorityCode' => $taskData['PriorityCode'],
+                        'ProgressCode' => $progressCode,
+                        'ProgressBar' => $progressBar,
+                        'files' => $taskFileUrls,
+                        'assignedMembers' => $assignedMembers,
+                    ];
+                }
+            }
+
+            // 6. Create Expenses (if any)
+            $createdExpenses = [];
+            if ($request->has('expenses') && !empty($request->input('expenses'))) {
+                foreach ($request->input('expenses') as $expenseData) {
+                    $expenseTimestamp = Carbon::now()->timestamp;
+                    $expenseId = $expenseTimestamp . random_numbersu(5);
+
+                    $expense = ProjectExpense::create([
+                        'ProjectExpenseID' => $expenseId,
+                        'AtTimeStamp' => $expenseTimestamp,
+                        'ByUserID' => $authUserId,
+                        'OperationCode' => 'I',
+                        'ProjectID' => $projectId,
+                        'ExpenseDate' => $expenseData['ExpenseDate'],
+                        'ExpenseNote' => $expenseData['ExpenseNote'],
+                        'CurrencyCode' => $expenseData['CurrencyCode'],
+                        'ExpenseAmount' => $expenseData['ExpenseAmount'],
+                        'IsDelete' => false,
+                        'IsCheck' => false,
+                    ]);
+
+                    $expenseFileUrls = [];
+
+                    // 6a. Generate Presigned URLs for Expense Files (if any)
+                    if (!empty($expenseData['files'])) {
+                        foreach ($expenseData['files'] as $fileData) {
+                            $fileResult = $this->handleExpenseFileUpload(
+                                $projectId,
+                                $expenseId,
+                                $fileData,
+                                $authUserId,
+                                $expenseTimestamp
+                            );
+
+                            $expenseFileUrls[] = $fileResult;
+                        }
+                    }
+
+                    $createdExpenses[] = [
+                        'ProjectExpenseID' => $expenseId,
+                        'ExpenseNote' => $expenseData['ExpenseNote'],
+                        'ExpenseAmount' => $expenseData['ExpenseAmount'],
+                        'files' => $expenseFileUrls,
+                    ];
+                }
+            }
+
+            // 7. Update Project Status with counts
+            $this->updateProjectStatus($projectId);
+
+            // 8. Create Audit Log
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'ReferenceTable' => 'Project',
+                'ReferenceRecordID' => $projectId,
+                'Data' => json_encode([
+                    'ProjectID' => $projectId,
+                    'ProjectDescription' => $project->ProjectDescription,
+                    'LevelNo' => $project->LevelNo,
+                    'StartDate' => $project->StartDate,
+                    'EndDate' => $project->EndDate,
+                    'PriorityCode' => $project->PriorityCode,
+                    'StatusCode' => $request->input('status.ProjectStatusCode'),
+                    'TotalMembers' => count($createdMembers),
+                    'TotalMiniGoals' => count($createdMiniGoals),
+                    'TotalTasks' => count($createdTasks),
+                    'TotalExpenses' => count($createdExpenses),
+                ]),
+                'Note' => 'Project created via wizard'
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Project created successfully',
+                'data' => [
+                    'ProjectID' => $projectId,
+                    'ProjectDescription' => $project->ProjectDescription,
+                    'StartDate' => $project->StartDate,
+                    'EndDate' => $project->EndDate,
+                    'members' => $createdMembers,
+                    'mini_goals' => $createdMiniGoals,
+                    'tasks' => $createdTasks,
+                    'expenses' => $createdExpenses,
+                ],
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create project',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function old_store(Request $request)
     {
         $validator = Validator::make($request->all(), [
             // Project Data
@@ -1073,7 +1492,7 @@ class ProjectController extends Controller
             'TaskDescription' => 'required|string|max:200',
             'StartDate' => 'required|date',
             'EndDate' => 'required|date|after_or_equal:StartDate',
-            'ProgressCode' => 'required|integer|in:0,1,2',
+            'ProgressBar' => 'nullable|numeric|min:0|max:100', // NEW   
             'Note' => 'nullable|string',
 
             // Task Files (opsional)
@@ -1103,19 +1522,44 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
 
-            // Check if user is owner
-            $isOwner = ProjectMember::where('ProjectID', $projectId)
-                ->where('UserID', $authUserId)
-                ->where('IsOwner', true)
-                ->where('IsActive', true)
-                ->exists();
-
-            if (!$isOwner) {
+            // Check if user is THE ONLY owner
+            $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
+            if (!$ownerCheck['is_owner']) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Only project owner can add tasks',
+                    'message' => $ownerCheck['message'],
                 ], 403);
             }
+
+            // Validate task dates are within project dates
+            $dateValidation = $this->validateTaskDates(
+                $projectId,
+                $request->StartDate,
+                $request->EndDate
+            );
+
+            if (!$dateValidation['valid']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $dateValidation['message'],
+                ], 422);
+            }
+
+            // Calculate ProgressCode based on ProgressBar
+            $progressBar = $request->input('ProgressBar', 0);
+
+            // For new task, ProgressCode logic:
+            // - If ProgressBar = 0 → INITIAL (0)
+            // - If 0 < ProgressBar < 100 → ON-PROGRESS (1)
+            // - If ProgressBar = 100 → COMPLETED (2)
+            if ($progressBar >= 100) {
+                $progressCode = 2; // COMPLETED
+            } elseif ($progressBar > 0) {
+                $progressCode = 1; // ON-PROGRESS
+            } else {
+                $progressCode = 0; // INITIAL
+            }
+
 
             // Create task
             $taskId = $timestamp . random_numbersu(5);
@@ -1131,7 +1575,8 @@ class ProjectController extends Controller
                 'TaskDescription' => $request->TaskDescription,
                 'StartDate' => $request->StartDate,
                 'EndDate' => $request->EndDate,
-                'ProgressCode' => $request->ProgressCode,
+                'ProgressCode' => $progressCode,
+                'ProgressBar' => $progressBar,
                 'Note' => $request->Note,
                 'IsDelete' => false,
                 'IsCheck' => false,
@@ -1201,7 +1646,10 @@ class ProjectController extends Controller
                     'ProjectID' => $projectId,
                     'TaskDescription' => $request->TaskDescription,
                     'PriorityCode' => $request->PriorityCode,
-                    'ProgressCode' => $request->ProgressCode,
+                    'ProgressCode' => $progressCode,
+                    'ProgressBar' => $progressBar,
+                    'StartDate' => $request->StartDate,
+                    'EndDate' => $request->EndDate,
                     'TotalFiles' => count($taskFileUrls),
                     'AssignedMembers' => $assignedMembers,
                 ]),
@@ -1241,7 +1689,7 @@ class ProjectController extends Controller
             'TaskDescription' => 'nullable|string|max:200',
             'StartDate' => 'nullable|date',
             'EndDate' => 'nullable|date',
-            'ProgressCode' => 'nullable|integer|in:0,1,2',
+            'ProgressBar' => 'nullable|numeric|min:0|max:100', // NEW
             'Note' => 'nullable|string',
             'IsCheck' => 'nullable|boolean',
 
@@ -1277,18 +1725,14 @@ class ProjectController extends Controller
             $timestamp = Carbon::now()->timestamp;
 
             // Check if user is owner
-            $isOwner = ProjectMember::where('ProjectID', $projectId)
-                ->where('UserID', $authUserId)
-                ->where('IsOwner', true)
-                ->where('IsActive', true)
-                ->exists();
-
-            if (!$isOwner) {
+            $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
+            if (!$ownerCheck['is_owner']) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Only project owner can edit tasks',
+                    'message' => $ownerCheck['message'],
                 ], 403);
             }
+
 
             $task = ProjectTask::where('ProjectTaskID', $taskId)
                 ->where('ProjectID', $projectId)
@@ -1311,6 +1755,28 @@ class ProjectController extends Controller
                 'OperationCode' => 'U',
             ];
 
+            // Validate dates if changed
+            $newStartDate = $request->input('StartDate', $task->StartDate);
+            $newEndDate = $request->input('EndDate', $task->EndDate);
+
+            $dateValidation = $this->validateTaskDates($projectId, $newStartDate, $newEndDate);
+            if (!$dateValidation['valid']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $dateValidation['message'],
+                ], 422);
+            }
+
+            // Calculate new ProgressCode if ProgressBar or EndDate changed
+            $newProgressBar = $request->input('ProgressBar', $task->ProgressBar);
+            $originalEndDate = $task->EndDate;
+
+            $newProgressCode = $this->calculateProgressCode(
+                $newProgressBar,
+                $originalEndDate,
+                $newEndDate
+            );
+
             if ($request->has('ParentProjectTaskID')) {
                 $updateData['ParentProjectTaskID'] = $request->ParentProjectTaskID;
             }
@@ -1329,8 +1795,9 @@ class ProjectController extends Controller
             if ($request->has('EndDate')) {
                 $updateData['EndDate'] = $request->EndDate;
             }
-            if ($request->has('ProgressCode')) {
-                $updateData['ProgressCode'] = $request->ProgressCode;
+            if ($request->has('ProgressBar')) {
+                $updateData['ProgressBar'] = $newProgressBar;
+                $updateData['ProgressCode'] = $newProgressCode; // Auto-update based on logic
             }
             if ($request->has('Note')) {
                 $updateData['Note'] = $request->Note;
@@ -1420,6 +1887,8 @@ class ProjectController extends Controller
                 'Data' => json_encode([
                     'old' => $oldData,
                     'new' => $task->fresh()->toArray(),
+                    'progress_code_changed' => $oldData['ProgressCode'] != $newProgressCode,
+                    'new_progress_code' => $newProgressCode,
                     'new_files_count' => count($newTaskFileUrls),
                     'deleted_files_count' => count($request->delete_files ?? []),
                     'assigned_members' => $assignedMembers,
@@ -1824,6 +2293,349 @@ class ProjectController extends Controller
         }
     }
 
+    /**
+     * Delete Project Expense (Soft Delete)
+     */
+    public function deleteExpense(Request $request, $projectId, $expenseId)
+    {
+        DB::beginTransaction();
+        try {
+            $authUserId = $request->auth_user_id;
+            $timestamp = Carbon::now()->timestamp;
+
+            // Check if user is owner
+            $isOwner = ProjectMember::where('ProjectID', $projectId)
+                ->where('UserID', $authUserId)
+                ->where('IsOwner', true)
+                ->where('IsActive', true)
+                ->exists();
+
+            if (!$isOwner) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only project owner can delete expenses',
+                ], 403);
+            }
+
+            $expense = ProjectExpense::where('ProjectExpenseID', $expenseId)
+                ->where('ProjectID', $projectId)
+                ->where('IsDelete', false)
+                ->first();
+
+            if (!$expense) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Expense not found',
+                ], 404);
+            }
+
+            $oldData = $expense->toArray();
+
+            // Soft delete expense
+            $expense->update([
+                'IsDelete' => true,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'D',
+            ]);
+
+            // Soft delete all expense files
+            ProjectExpenseFile::where('ProjectExpenseID', $expenseId)
+                ->update([
+                    'IsDelete' => true,
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'D',
+                ]);
+
+            // Update project status
+            $this->updateProjectStatus($projectId);
+
+            // Create Audit Log
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'D',
+                'ReferenceTable' => 'ProjectExpense',
+                'ReferenceRecordID' => $expenseId,
+                'Data' => json_encode($oldData),
+                'Note' => 'Project expense deleted (soft delete)'
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Expense deleted successfully',
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete expense',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Add MiniGoal
+     */
+    public function addMiniGoal(Request $request, $projectId)
+    {
+        $validator = Validator::make($request->all(), [
+            'SequenceNo' => 'nullable|integer',
+            'MiniGoalDescription' => 'required|string|max:200',
+            'MiniGoalCategoryCode' => 'required|in:1,2,3', // 1=$, 2=%, 3=#
+            'TargetValue' => 'required|integer|min:0',
+            'ActualValue' => 'nullable|integer|min:0',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $authUserId = $request->auth_user_id;
+            $timestamp = Carbon::now()->timestamp;
+
+            // Check if user is owner
+            $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
+            if (!$ownerCheck['is_owner']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $ownerCheck['message'],
+                ], 403);
+            }
+
+            $miniGoalId = $timestamp . random_numbersu(5);
+            $miniGoal = MiniGoal::create([
+                'MiniGoalID' => $miniGoalId,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'ProjectID' => $projectId,
+                'SequenceNo' => $request->SequenceNo,
+                'MiniGoalDescription' => $request->MiniGoalDescription,
+                'MiniGoalCategoryCode' => $request->MiniGoalCategoryCode,
+                'TargetValue' => $request->TargetValue,
+                'ActualValue' => $request->input('ActualValue', 0),
+                'IsDelete' => false,
+            ]);
+
+            // Create Audit Log
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'ReferenceTable' => 'MiniGoal',
+                'ReferenceRecordID' => $miniGoalId,
+                'Data' => json_encode([
+                    'ProjectID' => $projectId,
+                    'MiniGoalDescription' => $request->MiniGoalDescription,
+                    'MiniGoalCategoryCode' => $request->MiniGoalCategoryCode,
+                    'TargetValue' => $request->TargetValue,
+                    'ActualValue' => $request->input('ActualValue', 0),
+                ]),
+                'Note' => 'Mini goal added'
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Mini goal added successfully',
+                'data' => $miniGoal,
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to add mini goal',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Update MiniGoal
+     */
+    public function updateMiniGoal(Request $request, $projectId, $miniGoalId)
+    {
+        $validator = Validator::make($request->all(), [
+            'SequenceNo' => 'nullable|integer',
+            'MiniGoalDescription' => 'nullable|string|max:200',
+            'MiniGoalCategoryCode' => 'nullable|in:1,2,3',
+            'TargetValue' => 'nullable|integer|min:0',
+            'ActualValue' => 'nullable|integer|min:0',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $authUserId = $request->auth_user_id;
+            $timestamp = Carbon::now()->timestamp;
+
+            // Check if user is owner
+            $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
+            if (!$ownerCheck['is_owner']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $ownerCheck['message'],
+                ], 403);
+            }
+
+            $miniGoal = MiniGoal::where('MiniGoalID', $miniGoalId)
+                ->where('ProjectID', $projectId)
+                ->where('IsDelete', false)
+                ->first();
+
+            if (!$miniGoal) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Mini goal not found',
+                ], 404);
+            }
+
+            $oldData = $miniGoal->toArray();
+
+            $updateData = [
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+            ];
+            if ($request->has('SequenceNo')) {
+                $updateData['SequenceNo'] = $request->SequenceNo;
+            }
+            if ($request->has('MiniGoalDescription')) {
+                $updateData['MiniGoalDescription'] = $request->MiniGoalDescription;
+            }
+            if ($request->has('MiniGoalCategoryCode')) {
+                $updateData['MiniGoalCategoryCode'] = $request->MiniGoalCategoryCode;
+            }
+            if ($request->has('TargetValue')) {
+                $updateData['TargetValue'] = $request->TargetValue;
+            }
+            if ($request->has('ActualValue')) {
+                $updateData['ActualValue'] = $request->ActualValue;
+            }
+
+            $miniGoal->update($updateData);
+
+            // Create Audit Log
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+                'ReferenceTable' => 'MiniGoal',
+                'ReferenceRecordID' => $miniGoalId,
+                'Data' => json_encode([
+                    'old' => $oldData,
+                    'new' => $miniGoal->fresh()->toArray(),
+                ]),
+                'Note' => 'Mini goal updated'
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Mini goal updated successfully',
+                'data' => $miniGoal->fresh(),
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update mini goal',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete MiniGoal (Soft Delete)
+     */
+    public function deleteMiniGoal(Request $request, $projectId, $miniGoalId)
+    {
+        DB::beginTransaction();
+        try {
+            $authUserId = $request->auth_user_id;
+            $timestamp = Carbon::now()->timestamp;
+            // Check if user is owner
+            $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
+            if (!$ownerCheck['is_owner']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $ownerCheck['message'],
+                ], 403);
+            }
+
+            $miniGoal = MiniGoal::where('MiniGoalID', $miniGoalId)
+                ->where('ProjectID', $projectId)
+                ->where('IsDelete', false)
+                ->first();
+
+            if (!$miniGoal) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Mini goal not found',
+                ], 404);
+            }
+
+            $oldData = $miniGoal->toArray();
+
+            $miniGoal->update([
+                'IsDelete' => true,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'D',
+            ]);
+
+            // Create Audit Log
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'D',
+                'ReferenceTable' => 'MiniGoal',
+                'ReferenceRecordID' => $miniGoalId,
+                'Data' => json_encode($oldData),
+                'Note' => 'Mini goal deleted (soft delete)'
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Mini goal deleted successfully',
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete mini goal',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+
 
     /**
      * Handle Task File Upload - Generate Presigned URLs
@@ -2153,5 +2965,87 @@ class ProjectController extends Controller
             'LastExpenseUpdateAtTimeStamp' => $lastExpenseUpdate?->AtTimeStamp,
             'LastExpenseUpdateByUserID' => $lastExpenseUpdate?->ByUserID,
         ]);
+    }
+
+    /**
+     * Calculate ProgressCode based on ProgressBar and dates
+     * 
+     * @param float $progressBar
+     * @param string $originalEndDate - Original end date from DB
+     * @param string $newEndDate - New end date from request
+     * @return int
+     */
+    private function calculateProgressCode($progressBar, $originalEndDate, $newEndDate)
+    {
+        // COMPLETED: progress = 100%
+        if ($progressBar >= 100) {
+            return 2;
+        }
+
+        // INITIAL: progress = 0%
+        if ($progressBar == 0) {
+            return 0;
+        }
+
+        // Check if end date has been extended (DELAYED)
+        if ($newEndDate > $originalEndDate) {
+            return 3; // DELAYED
+        }
+
+        // ON-PROGRESS: 0% < progress < 100%, no date extension
+        return 1;
+    }
+
+    /**
+     * Validate task dates are within project dates
+     */
+    private function validateTaskDates($projectId, $taskStartDate, $taskEndDate)
+    {
+        $project = Project::where('ProjectID', $projectId)->first();
+
+        if (!$project) {
+            return ['valid' => false, 'message' => 'Project not found'];
+        }
+
+        if ($taskStartDate < $project->StartDate || $taskStartDate > $project->EndDate) {
+            return [
+                'valid' => false,
+                'message' => "Task start date must be between project dates ({$project->StartDate} - {$project->EndDate})"
+            ];
+        }
+
+        if ($taskEndDate < $project->StartDate || $taskEndDate > $project->EndDate) {
+            return [
+                'valid' => false,
+                'message' => "Task end date must be between project dates ({$project->StartDate} - {$project->EndDate})"
+            ];
+        }
+
+        if ($taskEndDate < $taskStartDate) {
+            return ['valid' => false, 'message' => 'Task end date must be after or equal to start date'];
+        }
+
+        return ['valid' => true];
+    }
+
+    /**
+     * Check if user is the ONLY owner of the project
+     */
+    private function checkSingleOwner($projectId, $userId)
+    {
+        $owner = ProjectMember::where('ProjectID', $projectId)
+            ->where('IsOwner', true)
+            ->where('IsActive', true)
+            ->first();
+
+        if (!$owner) {
+            return ['is_owner' => false, 'message' => 'No active owner found for this project'];
+        }
+
+        if ($owner->UserID != $userId) {
+            return ['is_owner' => false, 'message' => 'Only the project owner can perform this action'];
+        }
+
+        return ['is_owner' => true, 'owner' => $owner];
     }
 }

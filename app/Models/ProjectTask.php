@@ -24,6 +24,7 @@ class ProjectTask extends Model
         'StartDate',
         'EndDate',
         'ProgressCode',
+        'ProgressBar',
         'Note',
         'IsDelete',
         'IsCheck',
@@ -32,6 +33,7 @@ class ProjectTask extends Model
     protected $casts = [
         'IsDelete' => 'boolean',
         'IsCheck' => 'boolean',
+        'ProgressBar' => 'float', 
     ];
 
     public function project()
@@ -47,5 +49,20 @@ class ProjectTask extends Model
     public function assignments()
     {
         return $this->hasMany(ProjectAssignMember::class, 'ProjectTaskID', 'ProjectTaskID');
+    }
+
+    /**
+     * Get progress status name
+     */
+    public function getProgressStatusAttribute()
+    {
+        $statuses = [
+            0 => 'INITIAL',
+            1 => 'ON-PROGRESS',
+            2 => 'COMPLETED',
+            3 => 'DELAYED',
+        ];
+
+        return $statuses[$this->ProgressCode] ?? 'Unknown';
     }
 }

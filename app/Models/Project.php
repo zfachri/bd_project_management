@@ -54,4 +54,19 @@ class Project extends Model
     {
         return $this->hasMany(ProjectExpense::class, 'ProjectID', 'ProjectID');
     }
+
+    public function miniGoals() // NEW
+    {
+        return $this->hasMany(MiniGoal::class, 'ProjectID', 'ProjectID');
+    }
+
+    /**
+     * Get the single owner of the project
+     */
+    public function owner()
+    {
+        return $this->hasOne(ProjectMember::class, 'ProjectID', 'ProjectID')
+            ->where('IsOwner', true)
+            ->where('IsActive', true);
+    }
 }
