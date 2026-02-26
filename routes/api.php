@@ -169,6 +169,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Route::middleware('permission:Document.edit')->group(function () {
         Route::post('/{documentId}/upload-version', [DocumentManagementController::class, 'updateDocument']);
         Route::put('/{documentId}/info', [DocumentManagementController::class, 'updateDocumentInfo']);
+        Route::patch('/{documentId}/inactive', [DocumentManagementController::class, 'inactiveDocument']);
         Route::post('/{documentId}/add-raci-document', [DocumentManagementController::class, 'addRaciDocument']);
         // });
         // Get document version URL (view/download)

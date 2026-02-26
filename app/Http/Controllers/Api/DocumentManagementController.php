@@ -93,6 +93,7 @@ class DocumentManagementController extends Controller
                 'Notes' => $request->input('notes'),
                 'OrganizationID' => $request->input('organization_id'),
                 'LatestVersionNo' => 1,
+                'IsActive' => true,
             ]);
 
             // ========================================
@@ -331,7 +332,7 @@ class DocumentManagementController extends Controller
             $hasConvertedPdf = $request->input('has_converted_pdf', false);
 
             // Check if document exists
-            $document = DocumentManagement::findOrFail($documentId);
+            $document = DocumentManagement::active()->findOrFail($documentId);
 
             // Get current latest version
             $currentVersion = $document->LatestVersionNo ?? 1;
@@ -505,12 +506,12 @@ class DocumentManagementController extends Controller
     public function getDocument(Request $request, $documentId)
     {
         try {
-            $document = DocumentManagement::findOrFail($documentId);
+            $document = DocumentManagement::active()->findOrFail($documentId);
 
             $documentType = $document->DocumentType;
 
             // Query ulang dengan eager load
-            $document = DocumentManagement::with([
+            $document = DocumentManagement::active()->with([
                 'documentVersions' => fn($q) => $q->orderBy('VersionNo', 'desc'),
                 'documentRoles.organization',
                 'organization',
@@ -573,9 +574,9 @@ class DocumentManagementController extends Controller
             $documentId = $request->input('document_id');
             $organizationId = $request->input('organization_id');
             $forceDownload = $request->input('force_download', false);
-            $document = DocumentManagement::findOrFail($documentId);
+            $document = DocumentManagement::active()->findOrFail($documentId);
 
-            $document = DocumentManagement::with('documentRoles')->findOrFail($documentId);
+            $document = DocumentManagement::active()->with('documentRoles')->findOrFail($documentId);
 
             // Check if user's organization has access
             $isOwner = $document->OrganizationID == $organizationId;
@@ -704,6 +705,7 @@ class DocumentManagementController extends Controller
             'document_type'   => 'nullable|string|max:255',
             'document_name'   => 'nullable|string|max:255',
             'search'          => 'nullable|string|max:255',
+            'is_active'       => 'nullable|boolean',
             'page'            => 'nullable|integer|min:1',
             'per_page'        => 'nullable|integer|min:1|max:100',
             'owned_page'      => 'nullable|integer|min:1',
@@ -766,6 +768,10 @@ class DocumentManagementController extends Controller
                             ->orWhere('DocumentType', 'LIKE', "%{$search}%")
                             ->orWhere('Description', 'LIKE', "%{$search}%");
                     });
+                }
+
+                if ($request->has('is_active')) {
+                    $query->where('IsActive', $request->boolean('is_active'));
                 }
 
                 return $query;
@@ -870,6 +876,73 @@ class DocumentManagementController extends Controller
         }
     }
 
+    public function inactiveDocument(Request $request, $documentId)
+    {
+        DB::beginTransaction();
+
+        try {
+            $authUser = $request->auth_user;
+            $authUserId = $request->auth_user_id;
+            $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
+            $timestamp = Carbon::now()->timestamp;
+
+            $document = DocumentManagement::findOrFail($documentId);
+
+            if (!$isAdmin) {
+                $employee = Employee::findOrFail($authUserId);
+                $employeeOrgId = (int) $employee->OrganizationID;
+
+                if ((int) $document->OrganizationID !== $employeeOrgId) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Only document owner organization can deactivate this document',
+                    ], 403);
+                }
+            }
+
+            $document->update([
+                'IsActive' => false,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+            ]);
+
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+                'ReferenceTable' => 'DocumentManagement',
+                'ReferenceRecordID' => $documentId,
+                'Data' => json_encode([
+                    'DocumentManagementID' => $documentId,
+                    'DocumentName' => $document->DocumentName,
+                    'IsActive' => false,
+                ]),
+                'Note' => 'Document set to inactive'
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Document deactivated successfully',
+                'data' => [
+                    'document_id' => (int) $documentId,
+                    'is_active' => false,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to deactivate document',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function oldlistByOrganization(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -910,7 +983,7 @@ class DocumentManagementController extends Controller
             // })
             //     ->with(['latestVersion', 'organization', 'user', 'documentRoles']);
 
-            $query = DocumentManagement::where('OrganizationID', $organizationId)
+            $query = DocumentManagement::active()->where('OrganizationID', $organizationId)
                 ->with([
                     'latestVersion',
                     'organization',
@@ -1011,6 +1084,7 @@ class DocumentManagementController extends Controller
             'document_type' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'notes' => 'nullable|string',
+            'is_active' => 'nullable|boolean',
 
                     // Document Roles update
         'access_organization_ids' => 'nullable|array',
@@ -1034,7 +1108,7 @@ class DocumentManagementController extends Controller
             // $authUserId = $request->user()->UserID ?? $request->user()->id;
             $timestamp = Carbon::now()->timestamp;
 
-            $document = DocumentManagement::with('documentRoles')->findOrFail($documentId);
+            $document = DocumentManagement::active()->with('documentRoles')->findOrFail($documentId);
             $oldData = $document->toArray();
 
             $updateData = array_filter([
@@ -1042,6 +1116,7 @@ class DocumentManagementController extends Controller
                 'DocumentType' => $request->input('document_type'),
                 'Description' => $request->input('description'),
                 'Notes' => $request->input('notes'),
+                'IsActive' => $request->input('is_active'),
             ], function ($value) {
                 return !is_null($value);
             });
@@ -1168,7 +1243,7 @@ class DocumentManagementController extends Controller
             'documentRoles.organization',
             'organization',
             'user'
-        ])->find($documentId);
+        ])->findOrFail($documentId);
 
             return response()->json([
                 'success' => true,
@@ -1208,6 +1283,7 @@ class DocumentManagementController extends Controller
 
             // Ambil document & cek akses
             $document = DocumentManagement::with('documentRoles')
+                ->active()
                 ->findOrFail($documentId);
 
             // Cek akses
@@ -1289,6 +1365,7 @@ class DocumentManagementController extends Controller
 
             // Check if document exists
             $document = DocumentManagement::with('documentRoles')
+                ->active()
                 ->findOrFail($documentId);
 
             // Check access permission
@@ -1382,6 +1459,7 @@ class DocumentManagementController extends Controller
 
             // Check if document exists
             $document = DocumentManagement::with('documentRoles')
+                ->active()
                 ->findOrFail($documentId);
 
             // Check access permission (only owner can add RACI)

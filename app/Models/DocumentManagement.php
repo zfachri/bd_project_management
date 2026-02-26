@@ -24,6 +24,7 @@ class DocumentManagement extends Model
         'Notes',
         'OrganizationID',
         'LatestVersionNo',
+        'IsActive',
     ];
 
     protected $casts = [
@@ -32,10 +33,12 @@ class DocumentManagement extends Model
         'ByUserID' => 'integer',
         'OrganizationID' => 'integer',
         'LatestVersionNo' => 'integer',
+        'IsActive' => 'boolean',
     ];
 
     protected $attributes = [
         'LatestVersionNo' => 1,
+        'IsActive' => true,
     ];
 
     /**
@@ -102,6 +105,14 @@ class DocumentManagement extends Model
     public function scopeByOrganization($query, int $organizationId)
     {
         return $query->where('OrganizationID', $organizationId);
+    }
+
+    /**
+     * Scope to get active documents
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('IsActive', true);
     }
 
     /**
