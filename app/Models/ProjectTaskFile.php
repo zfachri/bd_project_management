@@ -35,4 +35,9 @@ class ProjectTaskFile extends Model
     {
         return $this->belongsTo(ProjectTask::class, 'ProjectTaskID', 'ProjectTaskID');
     }
+
+    public function uploader()
+{
+    return $this->belongsTo(User::class, 'ByUserID', 'UserID');
+}
 }

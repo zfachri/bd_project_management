@@ -8,6 +8,7 @@ use App\Models\AuditLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class OrganizationController extends Controller
 {
@@ -182,6 +183,29 @@ class OrganizationController extends Controller
         } else {
             $organizations = Organization::active()->get();
         }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Organizations retrieved successfully',
+            'data' => $organizations
+        ], 200);
+    }
+
+    /**
+     * Get all organizations (id and name only)
+     */
+    public function allIdName(Request $request)
+    {
+        $organizations = Organization::active()
+            ->orderBy('OrganizationName')
+            ->get(['OrganizationID', 'OrganizationName'])
+            ->map(function ($org) {
+                return [
+                    'id' => $org->OrganizationID,
+                    'name' => $org->OrganizationName,
+                ];
+            })
+            ->values();
 
         return response()->json([
             'success' => true,
@@ -675,8 +699,8 @@ class OrganizationController extends Controller
                 ->orderBy('OrganizationName')
                 ->get();
 
-            \Log::info('Total Organizations: ' . $organizations->count());
-            \Log::info(
+            Log::info('Total Organizations: ' . $organizations->count());
+            Log::info(
                 'Root Organizations (ParentOrganizationID = OrganizationID): ' .
                     $organizations->filter(function ($org) {
                         return $org->ParentOrganizationID == $org->OrganizationID;

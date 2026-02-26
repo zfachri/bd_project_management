@@ -36,5 +36,10 @@ class ProjectMember extends Model
     public function assignments()
     {
         return $this->hasMany(ProjectAssignMember::class, 'ProjectMemberID', 'ProjectMemberID');
+    }   
+
+     public function user()
+    {
+        return $this->belongsTo(User::class,'UserID','UserID');
     }
 }

@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\EmployeeController;
 use App\Http\Controllers\Api\FileUploadController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\ProjectController;
+use App\Http\Controllers\Api\ProjectFilterController;
 
 /*
 |--------------------------------------------------------------------------
@@ -65,6 +66,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Route::middleware('permission:Organization.view')->group(function () {
         Route::get('/', [OrganizationController::class, 'index']);
         Route::get('/all', [OrganizationController::class, 'all']);
+        Route::get('/all-id-name', [OrganizationController::class, 'allIdName']);
         Route::get('/level/{level}', [OrganizationController::class, 'getByLevel']);
         Route::get('/hierarchy', [OrganizationController::class, 'getHierarchy']);
         Route::get('/hierarchy/{id}', [OrganizationController::class, 'getHierarchyFrom']);
@@ -227,6 +229,12 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Get all modules (for permission setup UI)
         Route::get('/modules', [RoleController::class, 'getModules']);
 
+        // Get employees without active role
+        Route::get('/unassigned-employees', [RoleController::class, 'getEmployeesWithoutRole']);
+
+        // Get users by role
+        Route::get('/{roleId}/users', [RoleController::class, 'getUsersByRole']);
+
         // Get single role with permissions
         Route::get('/{id}', [RoleController::class, 'show']);
 
@@ -266,9 +274,14 @@ Route::middleware(['jwt.auth'])->group(function () {
         // ========================
         Route::get('/', [ProjectController::class, 'index']);          // List projects
         Route::post('/', [ProjectController::class, 'store']);         // Create project
+        Route::get('myTasks', [ProjectController::class, 'byTasks']);
+        Route::get('byExpenses', [ProjectController::class, 'listAllExpense']);
+        Route::get('for-task-filter', [ProjectFilterController::class, 'index']);
+
         Route::get('{projectId}', [ProjectController::class, 'show']); // Project detail
         Route::put('{projectId}', [ProjectController::class, 'update']); // Update project
-        Route::delete('{projectId}', [ProjectController::class, 'destroy']); // Soft delete
+        Route::post('{projectId}/delete', [ProjectController::class, 'destroy']); // Soft delete
+        Route::get('{projectId}/files', [ProjectController::class, 'projectFiles']); // Get project files
 
         // ========================
         // PROJECT MEMBERS
@@ -279,20 +292,23 @@ Route::middleware(['jwt.auth'])->group(function () {
         // ========================
         // PROJECT TASKS
         // ========================
+        Route::get('{projectId}/tasks', [ProjectController::class, 'projectTasks']);
         Route::post('{projectId}/tasks', [ProjectController::class, 'addTask']);
+        Route::get('{project_id}/tasks/{task_id}', [ProjectController::class, 'taskDetail']);
         Route::put('{projectId}/tasks/{taskId}', [ProjectController::class, 'updateTask']);
-        Route::delete('{projectId}/tasks/{taskId}', [ProjectController::class, 'deleteTask']);
+        Route::put('{projectId}/tasks/{taskId}/delete', [ProjectController::class, 'deleteTask']);
 
         // ========================
         // PROJECT EXPENSES
         // ========================
         Route::post('{projectId}/expenses', [ProjectController::class, 'addExpense']);
+        Route::get('{project_id}/expenses/{expense_id}', [ProjectController::class, 'expenseDetail']);
         Route::put('{projectId}/expenses/{expenseId}', [ProjectController::class, 'updateExpense']);
-        Route::delete('/{projectId}/expenses/{expenseId}', [ProjectController::class, 'deleteExpense']);
+        Route::put('{projectId}/expenses/{expenseId}/delete', [ProjectController::class, 'deleteExpense']);
 
         // MiniGoal Management (NEW)
-        Route::post('/{projectId}/mini-goals', [ProjectController::class, 'addMiniGoal']);
-        Route::put('/{projectId}/mini-goals/{miniGoalId}', [ProjectController::class, 'updateMiniGoal']);
-        Route::delete('/{projectId}/mini-goals/{miniGoalId}', [ProjectController::class, 'deleteMiniGoal']);
+        Route::post('{projectId}/mini-goals', [ProjectController::class, 'addMiniGoal']);
+        Route::put('{projectId}/mini-goals/{miniGoalId}', [ProjectController::class, 'updateMiniGoal']);
+        Route::put('{projectId}/mini-goals/{miniGoalId}/delete', [ProjectController::class, 'deleteMiniGoal']);
     });
 });

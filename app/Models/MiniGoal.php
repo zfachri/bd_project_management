@@ -19,6 +19,8 @@ class MiniGoal extends Model
         'SequenceNo',
         'MiniGoalDescription',
         'MiniGoalCategoryCode',
+        'MiniGoalFirstPrefixCode',
+        'MiniGoalLastPrefixCode',
         'TargetValue',
         'ActualValue',
         'IsDelete',
@@ -26,8 +28,8 @@ class MiniGoal extends Model
 
     protected $casts = [
         'IsDelete' => 'boolean',
-        'TargetValue' => 'integer',
-        'ActualValue' => 'integer',
+        'TargetValue' => 'double',
+        'ActualValue' => 'double',
     ];
 
     public function project()

@@ -21,18 +21,25 @@ class Project extends Model
         'IsChild',
         'ProjectCategoryID',
         'ProjectDescription',
+        'ProjectName',
         'CurrencyCode',
         'BudgetAmount',
         'IsDelete',
         'StartDate',
         'EndDate',
         'PriorityCode',
+        'DocumentPath',
+        'DocumentUrl',
+        'DocumentOriginalPath',
+        'DocumentOriginalUrl',
     ];
 
     protected $casts = [
         'IsChild' => 'boolean',
         'IsDelete' => 'boolean',
         'BudgetAmount' => 'decimal:0',
+        'StartDate'  => 'date:Y-m-d',
+        'EndDate'    => 'date:Y-m-d',
     ];
 
     public function status()
@@ -57,7 +64,7 @@ class Project extends Model
 
     public function miniGoals() // NEW
     {
-        return $this->hasMany(MiniGoal::class, 'ProjectID', 'ProjectID');
+        return $this->hasMany(MiniGoal::class, 'ProjectID', 'ProjectID')->where('IsDelete', false);
     }
 
     /**

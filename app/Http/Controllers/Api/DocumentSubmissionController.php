@@ -384,6 +384,20 @@ class DocumentSubmissionController extends Controller
         try {
             $authUserId = $request->auth_user_id;
 
+             /**
+             * Base query
+             */
+            $baseQuery = DocumentSubmission::where('ByUserID', $authUserId);
+
+            /**
+             * 🔢 Status counters (ALL data, not affected by filter)
+             */
+            $statusCounts = [
+                'pending' => (clone $baseQuery)->where('status', 'request')->count(),
+                'approve' => (clone $baseQuery)->where('status', 'approve')->count(),
+                'decline' => (clone $baseQuery)->where('status', 'decline')->count(),
+            ];
+
             $query = DocumentSubmission::where('ByUserID', $authUserId)
                 ->with(['organization', 'notesBy']);
 
@@ -399,6 +413,7 @@ class DocumentSubmissionController extends Controller
                 'message' => 'Your submissions retrieved successfully',
                 'data' => $submissions,
                 'total' => $submissions->count(),
+                'stats'   => $statusCounts,
                 'filters' => [
                     'status' => $request->input('status'),
                 ]

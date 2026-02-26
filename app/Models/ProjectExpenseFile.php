@@ -35,4 +35,8 @@ class ProjectExpenseFile extends Model
     {
         return $this->belongsTo(ProjectExpense::class, 'ProjectExpenseID', 'ProjectExpenseID');
     }
+        public function uploader()
+    {
+        return $this->belongsTo(User::class,'ByUserID','UserID');
+    }
 }

@@ -696,7 +696,181 @@ class DocumentManagementController extends Controller
     /**
      * List documents by organization
      */
+
     public function listByOrganization(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'organization_id' => 'nullable|integer|exists:Organization,OrganizationID',
+            'document_type'   => 'nullable|string|max:255',
+            'document_name'   => 'nullable|string|max:255',
+            'search'          => 'nullable|string|max:255',
+            'page'            => 'nullable|integer|min:1',
+            'per_page'        => 'nullable|integer|min:1|max:100',
+            'owned_page'      => 'nullable|integer|min:1',
+            'owned_per_page'  => 'nullable|integer|min:1|max:100',
+            'assigned_page'   => 'nullable|integer|min:1',
+            'assigned_per_page' => 'nullable|integer|min:1|max:100',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors'  => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $currentUser = $request->auth_user;
+            $isAdmin = (bool) $currentUser->IsAdministrator;
+
+            $employeeOrgId = null;
+            if (!$isAdmin) {
+                $employee = Employee::findOrFail($currentUser->UserID);
+                $employeeOrgId = $employee->OrganizationID;
+            }
+
+            if (!$isAdmin && $request->filled('organization_id') && (int) $request->input('organization_id') !== (int) $employeeOrgId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Non-admin can only query their own organization',
+                ], 403);
+            }
+
+            $targetOrgId = $isAdmin
+                ? ($request->filled('organization_id') ? (int) $request->input('organization_id') : null)
+                : (int) $employeeOrgId;
+
+            $withRelations = [
+                'latestVersion',
+                'organization',
+                'user',
+                'documentRoles',
+                'raciActivities.position.organization',
+                'raciActivities.position.positionLevel',
+            ];
+
+            $applyCommonFilters = function ($query) use ($request) {
+                if ($request->filled('document_type')) {
+                    $query->where('DocumentType', $request->input('document_type'));
+                }
+
+                if ($request->filled('document_name')) {
+                    $query->where('DocumentName', 'LIKE', '%' . $request->input('document_name') . '%');
+                }
+
+                if ($request->filled('search')) {
+                    $search = $request->input('search');
+                    $query->where(function ($q) use ($search) {
+                        $q->where('DocumentName', 'LIKE', "%{$search}%")
+                            ->orWhere('DocumentType', 'LIKE', "%{$search}%")
+                            ->orWhere('Description', 'LIKE', "%{$search}%");
+                    });
+                }
+
+                return $query;
+            };
+
+            $ownedQuery = $applyCommonFilters(DocumentManagement::query()->with($withRelations));
+            if (!is_null($targetOrgId)) {
+                $ownedQuery->where('OrganizationID', $targetOrgId);
+            }
+
+            $assignedQuery = $applyCommonFilters(DocumentManagement::query()->with($withRelations));
+            if (!is_null($targetOrgId)) {
+                $assignedQuery
+                    ->where('OrganizationID', '!=', $targetOrgId)
+                    ->whereHas('documentRoles', function ($q) use ($targetOrgId) {
+                        $q->where('OrganizationID', $targetOrgId);
+                    });
+            } else {
+                $assignedQuery->whereRaw('1 = 0');
+            }
+
+            $defaultPerPage = (int) $request->input('per_page', 10);
+            $defaultPage = (int) $request->input('page', 1);
+            $ownedPerPage = (int) $request->input('owned_per_page', $defaultPerPage);
+            $assignedPerPage = (int) $request->input('assigned_per_page', $defaultPerPage);
+            $ownedPage = (int) $request->input('owned_page', $defaultPage);
+            $assignedPage = (int) $request->input('assigned_page', $defaultPage);
+
+            $ownedDocuments = $ownedQuery
+                ->orderBy('AtTimeStamp', 'desc')
+                ->paginate($ownedPerPage, ['*'], 'owned_page', $ownedPage);
+
+            $assignedDocuments = $assignedQuery
+                ->orderBy('AtTimeStamp', 'desc')
+                ->paginate($assignedPerPage, ['*'], 'assigned_page', $assignedPage);
+
+            $transformDocuments = function ($paginator) use ($isAdmin, $targetOrgId) {
+                $paginator->getCollection()->transform(function ($document) use ($isAdmin, $targetOrgId) {
+                    $isOwner = !is_null($targetOrgId) && (int) $document->OrganizationID === (int) $targetOrgId;
+
+                    $accessRole = null;
+                    if (!is_null($targetOrgId) && !$isOwner) {
+                        $accessRole = $document->documentRoles
+                            ->where('OrganizationID', $targetOrgId)
+                            ->first();
+                    }
+
+                    $latest = optional($document->latestVersion)->first();
+
+                    $document->latest_file = [
+                        'version_no' => $latest->VersionNo ?? null,
+                        'file_path'  => $latest->DocumentPath ?? null,
+                        'file_url'   => $latest->DocumentUrl ?? null,
+                    ];
+
+                    $document->access_info = [
+                        'is_admin' => $isAdmin,
+                        'reference_organization_id' => $targetOrgId,
+                        'is_owner' => $isOwner,
+                        'can_download' => $isAdmin ? true : ($isOwner ? true : ($accessRole->IsDownload ?? false)),
+                        'can_comment' => $isAdmin ? true : ($isOwner ? true : ($accessRole->IsComment ?? false)),
+                    ];
+
+                    return $document;
+                });
+
+                return $paginator;
+            };
+
+            $ownedDocuments = $transformDocuments($ownedDocuments);
+            $assignedDocuments = $transformDocuments($assignedDocuments);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Documents retrieved successfully',
+                'data' => [
+                    'owned_documents' => $ownedDocuments->items(),
+                    'assigned_documents' => $assignedDocuments->items(),
+                ],
+                'meta' => [
+                    'reference_organization_id' => $targetOrgId,
+                    'owned' => [
+                        'current_page' => $ownedDocuments->currentPage(),
+                        'per_page' => $ownedDocuments->perPage(),
+                        'total' => $ownedDocuments->total(),
+                        'last_page' => $ownedDocuments->lastPage(),
+                    ],
+                    'assigned' => [
+                        'current_page' => $assignedDocuments->currentPage(),
+                        'per_page' => $assignedDocuments->perPage(),
+                        'total' => $assignedDocuments->total(),
+                        'last_page' => $assignedDocuments->lastPage(),
+                    ],
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve documents',
+                'error'   => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function oldlistByOrganization(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'organization_id' => 'required|integer|exists:Organization,OrganizationID',
@@ -875,78 +1049,101 @@ class DocumentManagementController extends Controller
             $document->update($updateData);
 
             // Update DocumentRole if access_organization_ids is provided
-        if ($request->has('access_organization_ids')) {
-            $accessOrgIds = $request->input('access_organization_ids');
-            $ownerOrgId = $document->OrganizationID;
+            if ($request->has('access_organization_ids')) {
+                $accessOrgIds = array_values(array_unique($request->input('access_organization_ids', [])));
+                $ownerOrgId = $document->OrganizationID;
 
-            // VALIDASI: Owner organization HARUS ada dalam access_organization_ids
-            if (!in_array($ownerOrgId, $accessOrgIds)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Owner organization cannot be removed from document access',
-                    'errors' => [
-                        'access_organization_ids' => [
-                            "Owner organization (ID: {$ownerOrgId}) must be included in access list"
+                // VALIDASI: Owner organization HARUS ada dalam access_organization_ids
+                if (!in_array($ownerOrgId, $accessOrgIds)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Owner organization cannot be removed from document access',
+                        'errors' => [
+                            'access_organization_ids' => [
+                                "Owner organization (ID: {$ownerOrgId}) must be included in access list"
+                            ]
+                        ],
+                        'owner_organization_id' => $ownerOrgId
+                    ], 422);
+                }
+
+                $oldAllowedOrgIds = $document->documentRoles
+                    ->pluck('OrganizationID')
+                    ->push($ownerOrgId)
+                    ->unique()
+                    ->values()
+                    ->toArray();
+
+                $removedOrgIds = array_values(array_diff($oldAllowedOrgIds, $accessOrgIds));
+                $blockedOrgIds = $this->getBlockedRemovedOrganizationIds($documentId, $removedOrgIds);
+
+                if (!empty($blockedOrgIds)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Not allowed to remove organization(s) because PIC is still registered in document RACI activities',
+                        'errors' => [
+                            'removed_organization_ids' => $removedOrgIds,
+                            'blocked_organization_ids' => $blockedOrgIds,
                         ]
-                    ],
-                    'owner_organization_id' => $ownerOrgId
-                ], 422);
-            }
+                    ], 400);
+                }
 
-            // Backup old DocumentRoles for audit log
-            $oldDocumentRoles = $document->documentRoles->map(function ($role) {
-                return [
-                    'DocumentRoleID' => $role->DocumentRoleID,
-                    'OrganizationID' => $role->OrganizationID,
-                    'IsDownload' => $role->IsDownload,
-                    'IsComment' => $role->IsComment,
-                ];
-            })->toArray();
+                // Backup old DocumentRoles for audit log
+                $oldDocumentRoles = $document->documentRoles->map(function ($role) {
+                    return [
+                        'DocumentRoleID' => $role->DocumentRoleID,
+                        'OrganizationID' => $role->OrganizationID,
+                        'IsDownload' => $role->IsDownload,
+                        'IsComment' => $role->IsComment,
+                    ];
+                })->toArray();
 
-            // DELETE all existing DocumentRoles
-            DocumentRole::where('DocumentManagementID', $documentId)->delete();
+                // DELETE all existing DocumentRoles
+                DocumentRole::where('DocumentManagementID', $documentId)->delete();
 
-            // CREATE new DocumentRoles based on access_organization_ids
-            $isDownload = $request->input('is_download', true);
-            $isComment = $request->input('is_comment', true);
-            $newDocumentRoles = [];
+                // CREATE new DocumentRoles based on access_organization_ids
+                $isDownload = $request->input('is_download', true);
+                $isComment = $request->input('is_comment', true);
+                $newDocumentRoles = [];
 
-            foreach ($accessOrgIds as $orgId) {
-                $role = DocumentRole::create([
-                    'DocumentRoleID' => Carbon::now()->timestamp . random_numbersu(5),
-                    'DocumentManagementID' => $documentId,
-                    'OrganizationID' => $orgId,
-                    'IsDownload' => $isDownload,
-                    'IsComment' => $isComment,
+                foreach ($accessOrgIds as $orgId) {
+                    $role = DocumentRole::create([
+                        'DocumentRoleID' => Carbon::now()->timestamp . random_numbersu(5),
+                        'DocumentManagementID' => $documentId,
+                        'OrganizationID' => $orgId,
+                        'IsDownload' => $isDownload,
+                        'IsComment' => $isComment,
+                    ]);
+
+                    $newDocumentRoles[] = [
+                        'DocumentRoleID' => $role->DocumentRoleID,
+                        'OrganizationID' => $role->OrganizationID,
+                        'IsDownload' => $role->IsDownload,
+                        'IsComment' => $role->IsComment,
+                    ];
+
+                    // Small delay to ensure unique DocumentRoleID
+                    usleep(1000); // 1ms delay
+                }
+                // Create audit log for DocumentRole changes
+                AuditLog::create([
+                    'AuditLogID' => $timestamp . random_numbersu(5),
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'U',
+                    'ReferenceTable' => 'DocumentRole',
+                    'ReferenceRecordID' => $documentId,
+                    'Data' => json_encode([
+                        'DocumentManagementID' => $documentId,
+                        'DocumentName' => $document->DocumentName,
+                        'OldDocumentRoles' => $oldDocumentRoles,
+                        'NewDocumentRoles' => $newDocumentRoles,
+                    ]),
+                    'Note' => 'Document access roles updated'
                 ]);
-
-                $newDocumentRoles[] = [
-                    'DocumentRoleID' => $role->DocumentRoleID,
-                    'OrganizationID' => $role->OrganizationID,
-                    'IsDownload' => $role->IsDownload,
-                    'IsComment' => $role->IsComment,
-                ];
-
-                // Small delay to ensure unique DocumentRoleID
-                usleep(1000); // 1ms delay
             }
-            // Create audit log for DocumentRole changes
-            AuditLog::create([
-                'AuditLogID' => $timestamp . random_numbersu(5),
-                'AtTimeStamp' => $timestamp,
-                'ByUserID' => $authUserId,
-                'OperationCode' => 'U',
-                'ReferenceTable' => 'DocumentRole',
-                'ReferenceRecordID' => $documentId,
-                'Data' => json_encode([
-                    'DocumentManagementID' => $documentId,
-                    'DocumentName' => $document->DocumentName,
-                    'OldDocumentRoles' => $oldDocumentRoles,
-                    'NewDocumentRoles' => $newDocumentRoles,
-                ]),
-                'Note' => 'Document access roles updated'
-            ]);
-        }
 
 
              // Create audit log for document metadata update
@@ -1164,6 +1361,8 @@ class DocumentManagementController extends Controller
             'raci_activities.*.activity' => 'required|string|max:255',
             'raci_activities.*.pic' => 'required|integer|exists:Position,PositionID',
             'raci_activities.*.status' => 'required|in:' . implode(',', RaciActivity::getStatuses()),
+            'access_organization_ids' => 'nullable|array',
+            'access_organization_ids.*' => 'integer|exists:Organization,OrganizationID',
         ]);
 
         if ($validator->fails()) {
@@ -1193,6 +1392,63 @@ class DocumentManagementController extends Controller
                     'success' => false,
                     'message' => 'Only document owner can add RACI activities'
                 ], 403);
+            }
+
+            if ($request->has('access_organization_ids')) {
+                $newAccessOrgIds = array_values(array_unique($request->input('access_organization_ids', [])));
+                $ownerOrgId = $document->OrganizationID;
+
+                if (!in_array($ownerOrgId, $newAccessOrgIds)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Owner organization cannot be removed from document access',
+                        'errors' => [
+                            'access_organization_ids' => [
+                                "Owner organization (ID: {$ownerOrgId}) must be included in access list"
+                            ]
+                        ],
+                        'owner_organization_id' => $ownerOrgId
+                    ], 422);
+                }
+
+                $oldAllowedOrgIds = $document->documentRoles
+                    ->pluck('OrganizationID')
+                    ->push($ownerOrgId)
+                    ->unique()
+                    ->values()
+                    ->toArray();
+
+                $removedOrgIds = array_values(array_diff($oldAllowedOrgIds, $newAccessOrgIds));
+                $blockedOrgIds = $this->getBlockedRemovedOrganizationIds($documentId, $removedOrgIds);
+
+                if (!empty($blockedOrgIds)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Not allowed to change organization access because PIC from removed organization is still registered in RACI activities',
+                        'errors' => [
+                            'removed_organization_ids' => $removedOrgIds,
+                            'blocked_organization_ids' => $blockedOrgIds,
+                        ]
+                    ], 400);
+                }
+
+                DocumentRole::where('DocumentManagementID', $documentId)->delete();
+
+                foreach ($newAccessOrgIds as $orgId) {
+                    DocumentRole::create([
+                        'DocumentRoleID' => Carbon::now()->timestamp . random_numbersu(5),
+                        'DocumentManagementID' => $documentId,
+                        'OrganizationID' => $orgId,
+                        'IsDownload' => true,
+                        'IsComment' => true,
+                    ]);
+
+                    usleep(1000); // 1ms delay
+                }
+
+                $document->load('documentRoles');
             }
 
             // Get all allowed organization IDs (main organization + DocumentRoles)
@@ -1314,5 +1570,22 @@ class DocumentManagementController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function getBlockedRemovedOrganizationIds(int $documentId, array $removedOrgIds): array
+    {
+        if (empty($removedOrgIds)) {
+            return [];
+        }
+
+        return RaciActivity::query()
+            ->join('Position', 'RaciActivity.PIC', '=', 'Position.PositionID')
+            ->where('RaciActivity.DocumentManagementID', $documentId)
+            ->whereIn('Position.OrganizationID', $removedOrgIds)
+            ->distinct()
+            ->pluck('Position.OrganizationID')
+            ->map(fn($orgId) => (int) $orgId)
+            ->values()
+            ->toArray();
     }
 }

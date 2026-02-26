@@ -39,12 +39,22 @@ class ProjectController extends Controller
             'project.LevelNo' => 'required|integer|in:1,2',
             'project.IsChild' => 'required|boolean',
             'project.ProjectCategoryID' => 'nullable|integer',
+            'project.ProjectName' => 'required|string',
             'project.ProjectDescription' => 'required|string',
             'project.CurrencyCode' => 'nullable|string|max:3',
             'project.BudgetAmount' => 'nullable|numeric',
-            'project.StartDate' => 'required|date',
-            'project.EndDate' => 'required|date|after_or_equal:project.StartDate',
+            'project.StartDate' => 'required|date_format:Y-m-d',
+            'project.EndDate' => 'required|date_format:Y-m-d|after_or_equal:project.StartDate',
             'project.PriorityCode' => 'required|integer|in:1,2,3',
+
+            // Project Document (optional, SINGLE FILE)
+            'project_file.original_filename' => 'required_with:project_file|string|max:255',
+            'project_file.original_content_type' => 'required_with:project_file|string|max:100',
+            'project_file.original_file_size' => 'nullable|integer|min:1',
+            'project_file.has_converted_pdf' => 'required_with:project_file|boolean',
+            'project_file.converted_filename' => 'nullable|required_if:project_file.has_converted_pdf,true|string|max:255',
+            'project_file.converted_file_size' => 'nullable|integer|min:1',
+
 
             // Project Status
             'status.ProjectStatusCode' => 'required|string|max:2|in:00,10,11,12,99',
@@ -52,7 +62,7 @@ class ProjectController extends Controller
 
             // Members (wajib minimal 1 owner)
             'members' => 'required|array|min:1',
-            'members.*.UserID' => 'required|integer|exists:users,id',
+            'members.*.UserID' => 'required|integer|exists:User,UserID',
             'members.*.IsOwner' => 'required|boolean',
             'members.*.Title' => 'nullable|string|max:200',
 
@@ -61,6 +71,8 @@ class ProjectController extends Controller
             'mini_goals.*.SequenceNo' => 'nullable|integer',
             'mini_goals.*.MiniGoalDescription' => 'required|string|max:200',
             'mini_goals.*.MiniGoalCategoryCode' => 'required|in:1,2,3',
+            'mini_goals.*.MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
+            'mini_goals.*.MiniGoalLastPrefixCode' => 'nullable|string|max:10',
             'mini_goals.*.TargetValue' => 'required|integer|min:0',
             'mini_goals.*.ActualValue' => 'nullable|integer|min:0',
 
@@ -70,8 +82,8 @@ class ProjectController extends Controller
             'tasks.*.SequenceNo' => 'nullable|integer',
             'tasks.*.PriorityCode' => 'required|integer|in:1,2,3',
             'tasks.*.TaskDescription' => 'required|string|max:200',
-            'tasks.*.StartDate' => 'required|date',
-            'tasks.*.EndDate' => 'required|date|after_or_equal:tasks.*.StartDate',
+            'tasks.*.StartDate' => 'required|date_format:Y-m-d',
+            'tasks.*.EndDate' => 'required|date_format:Y-m-d|after_or_equal:tasks.*.StartDate',
             'tasks.*.ProgressBar' => 'nullable|numeric|min:0|max:100',
             'tasks.*.Note' => 'nullable|string',
 
@@ -86,11 +98,11 @@ class ProjectController extends Controller
 
             // Task Assigned Members (opsional, based on UserID)
             'tasks.*.assignedMembers' => 'nullable|array',
-            'tasks.*.assignedMembers.*' => 'integer|exists:users,id',
+            'tasks.*.assignedMembers.*' => 'integer|exists:User,UserID',
 
             // Expenses (opsional)
             'expenses' => 'nullable|array',
-            'expenses.*.ExpenseDate' => 'required|date',
+            'expenses.*.ExpenseDate' => 'required|date_format:Y-m-d',
             'expenses.*.ExpenseNote' => 'required|string|max:200',
             'expenses.*.CurrencyCode' => 'required|string|max:3',
             'expenses.*.ExpenseAmount' => 'required|numeric',
@@ -124,12 +136,15 @@ class ProjectController extends Controller
 
         // Validasi: user yang create harus jadi owner
         $authUserId = $request->auth_user_id;
-        $isCreatorOwner = $owners->contains('UserID', $authUserId);
-        if (!$isCreatorOwner) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Project creator must be set as the owner'
-            ], 422);
+        $user = $request->auth_user;
+        if(!$user->IsAdministrator) {
+            $isCreatorOwner = $owners->contains('UserID', $authUserId);
+            if (!$isCreatorOwner) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project creator must be set as the owner'
+                ], 422);
+            }
         }
 
         DB::beginTransaction();
@@ -147,6 +162,7 @@ class ProjectController extends Controller
                 'LevelNo' => $request->input('project.LevelNo'),
                 'IsChild' => $request->input('project.IsChild'),
                 'ProjectCategoryID' => $request->input('project.ProjectCategoryID'),
+                'ProjectName' => $request->input('project.ProjectName'),
                 'ProjectDescription' => $request->input('project.ProjectDescription'),
                 'CurrencyCode' => $request->input('project.CurrencyCode', 'IDR'),
                 'BudgetAmount' => $request->input('project.BudgetAmount', 0),
@@ -155,6 +171,18 @@ class ProjectController extends Controller
                 'EndDate' => $request->input('project.EndDate'),
                 'PriorityCode' => $request->input('project.PriorityCode'),
             ]);
+
+            // 1b. Handle Project Document Upload (if any)
+            $projectFileUpload = null;
+
+            if ($request->has('project_file')) {
+                $projectFileUpload = $this->handleProjectFileUpload(
+                    $projectId,
+                    $request->input('project_file'),
+                    $authUserId,
+                    $timestamp
+                );
+            }
 
             // 2. Create Project Status
             ProjectStatus::create([
@@ -225,6 +253,8 @@ class ProjectController extends Controller
                         'SequenceNo' => $miniGoalData['SequenceNo'] ?? null,
                         'MiniGoalDescription' => $miniGoalData['MiniGoalDescription'],
                         'MiniGoalCategoryCode' => $miniGoalData['MiniGoalCategoryCode'],
+                        'MiniGoalFirstPrefixCode' => $miniGoalData['MiniGoalFirstPrefixCode'] ?? "",
+                        'MiniGoalLastPrefixCode' => $miniGoalData['MiniGoalLastPrefixCode'] ?? "",
                         'TargetValue' => $miniGoalData['TargetValue'],
                         'ActualValue' => $miniGoalData['ActualValue'] ?? 0,
                         'IsDelete' => false,
@@ -234,6 +264,8 @@ class ProjectController extends Controller
                         'MiniGoalID' => $miniGoalId,
                         'MiniGoalDescription' => $miniGoalData['MiniGoalDescription'],
                         'MiniGoalCategoryCode' => $miniGoalData['MiniGoalCategoryCode'],
+                        'MiniGoalFirstPrefixCode' => $miniGoalData['MiniGoalFirstPrefixCode'] ?? "",
+                        'MiniGoalLastPrefixCode' => $miniGoalData['MiniGoalLastPrefixCode'] ?? "",
                         'TargetValue' => $miniGoalData['TargetValue'],
                         'ActualValue' => $miniGoalData['ActualValue'] ?? 0,
                     ];
@@ -428,6 +460,8 @@ class ProjectController extends Controller
                 'data' => [
                     'ProjectID' => $projectId,
                     'ProjectDescription' => $project->ProjectDescription,
+                    'ProjectName' => $project->ProjectName,
+                    'ProjectDocument' => $projectFileUpload,
                     'StartDate' => $project->StartDate,
                     'EndDate' => $project->EndDate,
                     'members' => $createdMembers,
@@ -457,8 +491,8 @@ class ProjectController extends Controller
             'project.ProjectDescription' => 'required|string',
             'project.CurrencyCode' => 'nullable|string|max:3',
             'project.BudgetAmount' => 'nullable|numeric',
-            'project.StartDate' => 'required|date',
-            'project.EndDate' => 'required|date|after_or_equal:project.StartDate',
+            'project.StartDate' => 'required|date_format:Y-m-d',
+            'project.EndDate' => 'required|date_format:Y-m-d|after_or_equal:project.StartDate',
             'project.PriorityCode' => 'required|integer|in:1,2,3',
 
             // Project Status
@@ -467,7 +501,7 @@ class ProjectController extends Controller
 
             // Members (wajib minimal 1)
             'members' => 'required|array|min:1',
-            'members.*.UserID' => 'required|integer|exists:users,id',
+            'members.*.UserID' => 'required|integer|exists:User,UserID',
             'members.*.IsOwner' => 'required|boolean',
             'members.*.Title' => 'nullable|string|max:200',
 
@@ -477,8 +511,8 @@ class ProjectController extends Controller
             'tasks.*.SequenceNo' => 'nullable|integer',
             'tasks.*.PriorityCode' => 'required|integer|in:1,2,3',
             'tasks.*.TaskDescription' => 'required|string|max:200',
-            'tasks.*.StartDate' => 'required|date',
-            'tasks.*.EndDate' => 'required|date|after_or_equal:tasks.*.StartDate',
+            'tasks.*.StartDate' => 'required|date_format:Y-m-d',
+            'tasks.*.EndDate' => 'required|date_format:Y-m-d|after_or_equal:tasks.*.StartDate',
             'tasks.*.ProgressCode' => 'required|integer|in:0,1,2',
             'tasks.*.Note' => 'nullable|string',
 
@@ -493,11 +527,11 @@ class ProjectController extends Controller
 
             // Task Assigned Members (opsional, based on UserID)
             'tasks.*.assignedMembers' => 'nullable|array',
-            'tasks.*.assignedMembers.*' => 'integer|exists:users,id',
+            'tasks.*.assignedMembers.*' => 'integer|exists:User,UserID',
 
             // Expenses (opsional)
             'expenses' => 'nullable|array',
-            'expenses.*.ExpenseDate' => 'required|date',
+            'expenses.*.ExpenseDate' => 'required|date_format:Y-m-d',
             'expenses.*.ExpenseNote' => 'required|string|max:200',
             'expenses.*.CurrencyCode' => 'required|string|max:3',
             'expenses.*.ExpenseAmount' => 'required|numeric',
@@ -783,97 +817,246 @@ class ProjectController extends Controller
         }
     }
 
-    /**
-     * List Projects (Role Aware)
-     *
-     * GET /projects
-     */
-    public function index(Request $request)
-    {
-        try {
-            $authUser   = $request->auth_user;
-            $authUserId = $request->auth_user_id;
+        /**
+         * List Projects (Role Aware)
+         *
+         * GET /projects
+         */
+        public function index(Request $request)
+        {
+            try {
+                // =========================
+                // VALIDATOR
+                // =========================
+                $validator = Validator::make($request->all(), [
+                    'page'      => 'nullable|integer|min:1',
+                    'per_page'  => 'nullable|integer|min:1|max:100',
+                    'Search'    => 'nullable|string|max:100',
+                    'StartDate' => 'nullable|date_format:Y-m-d',
+                    'EndDate'   => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
+                ], [
+                    'EndDate.after_or_equal' => 'EndDate must be greater than or equal to StartDate.'
+                ]);
 
-            // Sesuaikan field admin sesuai User model
-            $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
-
-            // ----------------------------------------
-            // BASE QUERY
-            // ----------------------------------------
-            $query = Project::query()
-                ->where('IsDelete', false)
-                ->with('status');
-
-            // ----------------------------------------
-            // FILTER FOR NON ADMIN
-            // ----------------------------------------
-            if (!$isAdmin) {
-                $query->whereIn('ProjectID', function ($q) use ($authUserId) {
-                    $q->select('ProjectID')
-                        ->from('ProjectMember')
-                        ->where('UserID', $authUserId)
-                        ->where('IsActive', true);
-                });
-            }
-
-            // ----------------------------------------
-            // FETCH PROJECTS
-            // ----------------------------------------
-            $projects = $query
-                ->orderBy('AtTimeStamp', 'desc')
-                ->get();
-
-            // ----------------------------------------
-            // MAP RESPONSE
-            // ----------------------------------------
-            $data = $projects->map(function ($project) use ($authUserId, $isAdmin) {
-
-                $member = null;
-
-                if (!$isAdmin) {
-                    $member = ProjectMember::where('ProjectID', $project->ProjectID)
-                        ->where('UserID', $authUserId)
-                        ->where('IsActive', true)
-                        ->first();
+                if ($validator->fails()) {
+                    return response()->json([
+                        'success' => false,
+                        'errors'  => $validator->errors(),
+                    ], 422);
                 }
 
-                return [
-                    'ProjectID' => $project->ProjectID,
-                    'ProjectDescription' => $project->ProjectDescription,
-                    'StartDate' => $project->StartDate,
-                    'EndDate' => $project->EndDate,
-                    'PriorityCode' => $project->PriorityCode,
+                $authUser   = $request->auth_user;
+                $authUserId = $request->auth_user_id;
 
-                    'Status' => [
-                        'ProjectStatusCode' => $project->status->ProjectStatusCode ?? null,
-                        'TotalMember' => $project->status->TotalMember ?? 0,
-                        'TotalTask' => $project->status->TotalTask ?? 0,
-                        'TotalExpense' => $project->status->TotalExpense ?? 0,
-                        'AccumulatedExpense' => $project->status->AccumulatedExpense ?? 0,
-                    ],
+                // Sesuaikan field admin sesuai User model
+                $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
+                $perPage    = $request->per_page ?? 10;
+                $page       = $request->page ?? 1;
 
-                    // Role info for FE
-                    'role' => $isAdmin
-                        ? 'ADMIN'
-                        : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
+                // ----------------------------------------
+                // BASE QUERY
+                // ----------------------------------------
+                $query = Project::query()
+                    ->where('Project.IsDelete', false)
+                    ->with('status')
+                
+                    // COUNT TASK
+                    ->select('Project.*')
+                    ->selectSub(function ($q) {
+                        $q->from('ProjectTask')
+                          ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
+                          ->where('ProjectTask.IsDelete', false)
+                          ->selectRaw('COUNT(*)');
+                    }, 'total_task')
+                
+                    // SUM PROGRESS WITH RULE
+                    ->selectSub(function ($q) {
+                        $q->from('ProjectTask')
+                          ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
+                          ->where('ProjectTask.IsDelete', false)
+                          ->selectRaw("
+                            COALESCE(SUM(
+                                CASE 
+                                    WHEN ProgressBar = 100 AND IsCheck = 0 THEN 99
+                                    ELSE ProgressBar
+                                END
+                            ), 0)
+                          ");
+                    }, 'total_progress');
 
-                    'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
-                ];
-            });
 
-            return response()->json([
-                'success' => true,
-                'data' => $data,
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch project list',
-                'error' => $e->getMessage(),
-            ], 500);
+                // ----------------------------------------
+                // FILTER FOR NON ADMIN
+                // ----------------------------------------
+                if (!$isAdmin) {
+                    $query->whereIn('ProjectID', function ($q) use ($authUserId) {
+                        $q->select('ProjectID')
+                            ->from('ProjectMember')
+                            ->where('UserID', $authUserId)
+                            ->where('IsActive', true);
+                    });
+                }
+
+                // =========================
+                // SEARCH FILTER
+                // =========================
+                if ($request->filled('Search')) {
+                    $query->where(function ($q) use ($request) {
+                        $q->where('Project.ProjectName', 'like', '%' . $request->Search . '%')
+                        ->orWhere('Project.ProjectDescription', 'like', '%' . $request->Search . '%');
+                    });
+                }
+
+                // =========================
+                // DATE FILTER (OVERLAP)
+                // =========================
+                // if ($request->filled('StartDate')) {
+                //     $query->whereDate('Project.EndDate', '>=', $request->StartDate);
+                // }
+
+                // if ($request->filled('EndDate')) {
+                //     $query->whereDate('Project.StartDate', '<=', $request->EndDate);
+                // }
+
+                if ($request->filled('StartDate') && $request->filled('EndDate')) {
+
+                    $query->where(function ($q) use ($request) {
+                        $q->whereDate('Project.StartDate', '<=', $request->StartDate)
+                          ->whereDate('Project.EndDate', '>=', $request->EndDate);
+                    });
+
+                }
+
+                // =========================
+                // PAGINATION
+                // =========================
+                $projects = $query
+                    ->orderBy('Project.AtTimeStamp', 'DESC')
+                    ->paginate($perPage, ['*'], 'page', $page);
+
+                // =========================
+                // TRANSFORM RESPONSE
+                // =========================
+                $data = $projects->getCollection()->transform(function ($project) use ($authUserId, $isAdmin) {
+
+                    $member = null;
+
+                    if (!$isAdmin) {
+                        $member = ProjectMember::where('ProjectID', $project->ProjectID)
+                            ->where('UserID', $authUserId)
+                            ->where('IsActive', true)
+                            ->first();
+                    }
+
+                    // =========================
+                    // CALCULATE FINAL PROGRESS
+                    // =========================
+                    $projectProgress = 0;
+
+                    if ($project->total_task > 0) {
+                        $projectProgress = round(
+                            $project->total_progress / $project->total_task,
+                            2
+                        );
+                    }
+
+                    return 
+                    [
+                        'ProjectID'          => $project->ProjectID,
+                        'ProjectName'        => $project->ProjectName,
+                        'ProjectDescription'=> $project->ProjectDescription,
+                        'StartDate'          => $project->StartDate,
+                        'EndDate'            => $project->EndDate,
+                        'PriorityCode'       => $project->PriorityCode,
+                        'Progress'            => $projectProgress,
+
+                        'Status' => [
+                            'ProjectStatusCode'  => $project->status->ProjectStatusCode ?? null,
+                            'TotalMember'        => $project->status->TotalMember ?? 0,
+                            'TotalTask'          => $project->status->TotalTask ?? 0,
+                            'TotalExpense'       => $project->status->TotalExpense ?? 0,
+                            'AccumulatedExpense' => $project->status->AccumulatedExpense ?? 0,
+                        ],
+
+                        // Role info for FE
+                        'role' => $isAdmin
+                            ? 'ADMIN'
+                            : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
+
+                        'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
+                    ];
+                });
+
+                return response()->json([
+                    'success' => true,
+                    'role'    => $isAdmin ? 'ADMIN' : 'USER',
+                    'data'    => $data,
+                    'meta'    => [
+                        'current_page' => $projects->currentPage(),
+                        'per_page'     => $projects->perPage(),
+                        'total'        => $projects->total(),
+                        'last_page'    => $projects->lastPage(),
+                    ]
+                ], 200);
+
+                // // ----------------------------------------
+                // // FETCH PROJECTS
+                // // ----------------------------------------
+                // $projects = $query  
+                //     ->orderBy('AtTimeStamp', 'desc')
+                //     ->get();
+
+                // // ----------------------------------------
+                // // MAP RESPONSE
+                // // ----------------------------------------
+                // $data = $projects->map(function ($project) use ($authUserId, $isAdmin) {
+
+                //     $member = null;
+
+                //     if (!$isAdmin) {
+                //         $member = ProjectMember::where('ProjectID', $project->ProjectID)
+                //             ->where('UserID', $authUserId)
+                //             ->where('IsActive', true)
+                //             ->first();
+                //     }
+
+                //     return [
+                //         'ProjectID' => $project->ProjectID,
+                //         'ProjectDescription' => $project->ProjectDescription,
+                //         'ProjectName' => $project->ProjectName,
+                //         'StartDate' => $project->StartDate,
+                //         'EndDate' => $project->EndDate,
+                //         'PriorityCode' => $project->PriorityCode,
+
+                //         'Status' => [
+                //             'ProjectStatusCode' => $project->status->ProjectStatusCode ?? null,
+                //             'TotalMember' => $project->status->TotalMember ?? 0,
+                //             'TotalTask' => $project->status->TotalTask ?? 0,
+                //             'TotalExpense' => $project->status->TotalExpense ?? 0,
+                //             'AccumulatedExpense' => $project->status->AccumulatedExpense ?? 0,
+                //         ],
+
+                //         // Role info for FE
+                //         'role' => $isAdmin
+                //             ? 'ADMIN'
+                //             : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
+
+                //         'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
+                //     ];
+                // });
+
+                // return response()->json([
+                //     'success' => true,
+                //     'data' => $data,
+                // ], 200);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to fetch project list',
+                    'error' => $e->getMessage(),
+                ], 500);
+            }
         }
-    }
-
 
     /**
      * Get Project Detail
@@ -893,7 +1076,7 @@ class ProjectController extends Controller
             $includeParam = $request->query('include');
             $includes = $includeParam
                 ? array_map('trim', explode(',', $includeParam))
-                : ['members', 'tasks', 'expenses'];
+                : ['members', 'tasks', 'expenses', 'mini_goals'];
 
             $memberStatus  = $request->query('member_status', 'active');
             $taskStatus    = $request->query('task_status', 'active');
@@ -915,14 +1098,24 @@ class ProjectController extends Controller
                 };
                 $relations[] = 'members.user';
             }
+            /**
+             * "success":false,"message":"Failed to fetch project detail","error":"Call to undefined relationship [user] on model [App\\Models\\ProjectMember]."}
+             */
 
             // =======================
             // TASKS
             // =======================
             if (in_array('tasks', $includes)) {
+                $isOwner = ProjectMember::where('ProjectID', $projectId)
+                    ->where('UserID', $authUserId)
+                    ->where('IsOwner', true)
+                    ->where('IsActive', true)
+                    ->exists();
+
                 $relations['tasks'] = function ($q) use (
                     $taskStatus,
                     $isAdmin,
+                    $isOwner,
                     $authUserId
                 ) {
                     // Status filter
@@ -933,7 +1126,7 @@ class ProjectController extends Controller
                     }
 
                     // 🔐 EMPLOYEE: hanya task yang di-assign ke dia
-                    if (!$isAdmin) {
+                    if (!$isAdmin && !$isOwner) {
                         $q->whereExists(function ($sub) use ($authUserId) {
                             $sub->selectRaw(1)
                                 ->from('ProjectAssignMember as pam')
@@ -972,6 +1165,16 @@ class ProjectController extends Controller
                 $relations[] = 'expenses.files';
             }
 
+            // =======================
+            // MINI GOALS
+            // =======================
+            if (in_array('mini_goals', $includes)) {
+                $relations['miniGoals'] = function ($q) {
+                    $q->where('IsDelete', false)
+                    ->orderBy('SequenceNo');
+                };
+            }
+
             // ----------------------------------------
             // Fetch project
             // ----------------------------------------
@@ -1003,6 +1206,17 @@ class ProjectController extends Controller
             if (!in_array('expenses', $includes)) {
                 unset($data['expenses']);
             }
+            if (!in_array('mini_goals', $includes)) {
+            unset($data['mini_goals']);
+            }
+
+            $data['document'] = $project->DocumentPath ? [
+                'path' => $project->DocumentPath,
+                'url'  => $project->DocumentUrl,
+                'original_path' => $project->DocumentOriginalPath,
+                'original_url'  => $project->DocumentOriginalUrl,
+            ] : null;
+
 
             return response()->json([
                 'success' => true,
@@ -1060,14 +1274,35 @@ class ProjectController extends Controller
         $validator = Validator::make($request->all(), [
             'ProjectDescription' => 'nullable|string',
             'ProjectCategoryID' => 'nullable|integer',
+            'ProjectName' => 'nullable|string',
             'CurrencyCode' => 'nullable|string|max:3',
             'BudgetAmount' => 'nullable|numeric',
-            'StartDate' => 'nullable|date',
-            'EndDate' => 'nullable|date|after_or_equal:StartDate',
+            'StartDate' => 'nullable|date_format:Y-m-d',
+            'EndDate' => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
             'PriorityCode' => 'nullable|integer|in:1,2,3',
             'ProjectStatusCode' => 'nullable|string|max:2|in:00,10,11,12,99',
             'ProjectStatusReason' => 'nullable|string|max:200',
+            // =====================
+            // PROJECT FILE (OPTIONAL, STRICT)
+            // =====================
+            'file' => 'nullable|array',
+            'file.original_filename' => 'required_with:file|string|max:255',
+            'file.original_content_type' => 'required_with:file|string|max:100',
+            'file.original_file_size' => 'nullable|integer|min:1',
+            'file.has_converted_pdf' => 'required_with:file|boolean',
+            'delete_file' => 'nullable|boolean',
+
+            'file.converted_filename' => 'required_if:file.has_converted_pdf,true|string|max:255',
+            'file.converted_file_size' => 'nullable|integer|min:1',
+            'Reason' => 'required|string|max:200'
         ]);
+
+        if ($request->boolean('delete_file') && $request->has('file')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot upload and delete file at the same time',
+            ], 422);
+        }
 
         if ($validator->fails()) {
             return response()->json([
@@ -1081,6 +1316,7 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             $project = Project::where('ProjectID', $projectId)
                 ->where('IsDelete', false)
@@ -1100,7 +1336,7 @@ class ProjectController extends Controller
                 ->where('IsActive', true)
                 ->exists();
 
-            if (!$isOwner) {
+            if (!$isOwner && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only project owner can update project',
@@ -1116,11 +1352,14 @@ class ProjectController extends Controller
                 'OperationCode' => 'U',
             ];
 
+            if ($request->has('ProjectCategoryID')) {
+                $updateData['ProjectCategoryID'] = $request->ProjectCategoryID;
+            }
             if ($request->has('ProjectDescription')) {
                 $updateData['ProjectDescription'] = $request->ProjectDescription;
             }
-            if ($request->has('ProjectCategoryID')) {
-                $updateData['ProjectCategoryID'] = $request->ProjectCategoryID;
+            if ($request->has('ProjectName')) {
+                $updateData['ProjectName'] = $request->ProjectName;
             }
             if ($request->has('CurrencyCode')) {
                 $updateData['CurrencyCode'] = $request->CurrencyCode;
@@ -1137,6 +1376,42 @@ class ProjectController extends Controller
             if ($request->has('PriorityCode')) {
                 $updateData['PriorityCode'] = $request->PriorityCode;
             }
+            // =====================
+            // PROJECT FILE HANDLING
+            // =====================
+
+            // CASE 1: DELETE FILE
+            if ($request->boolean('delete_file')) {
+                $project->update([
+                    'DocumentPath' => null,
+                    'DocumentUrl' => null,
+                    'DocumentOriginalPath' => null,
+                    'DocumentOriginalUrl' => null,
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'U',
+                ]);
+            }
+
+            // CASE 2: UPDATE / REPLACE FILE
+            elseif ($request->has('file')) {
+                $file = $request->input('file');
+
+                // upload ke MinIO
+                $uploadResult = $this->handleProjectFileEdit(
+                    $projectId,
+                    $request->input('file'),
+                    false, // bukan delete
+                    $authUserId,
+                    $timestamp
+                );
+
+                // $updateData['DocumentPath'] = $uploadResult['DocumentPath'];
+                // $updateData['DocumentUrl'] = $uploadResult['DocumentUrl'];
+                // $updateData['DocumentOriginalPath'] = $uploadResult['DocumentOriginalPath'];
+                // $updateData['DocumentOriginalUrl'] = $uploadResult['DocumentOriginalUrl'];
+            }
+
 
             $project->update($updateData);
 
@@ -1160,15 +1435,19 @@ class ProjectController extends Controller
                     'old' => $oldData,
                     'new' => $project->fresh()->toArray(),
                 ]),
-                'Note' => 'Project updated'
+                'Note' => $request->Reason ?? 'Project updated'
             ]);
 
             DB::commit();
+            $projectData = $project->fresh(['status'])->toArray();
+            if (!empty($uploadResult)) {
+                $projectData['file_upload'] = $uploadResult;
+            }
 
             return response()->json([
                 'success' => true,
                 'message' => 'Project updated successfully',
-                'data' => $project->fresh(['status']),
+                'data' => $projectData,
             ], 200);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -1185,10 +1464,23 @@ class ProjectController extends Controller
      */
     public function destroy(Request $request, $projectId)
     {
+         $validator = Validator::make($request->all(), [
+            'Reason' => 'required|string|max:200'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             $project = Project::where('ProjectID', $projectId)
                 ->where('IsDelete', false)
@@ -1208,7 +1500,7 @@ class ProjectController extends Controller
                 ->where('IsActive', true)
                 ->exists();
 
-            if (!$isOwner) {
+            if (!$isOwner && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only project owner can delete project',
@@ -1240,7 +1532,7 @@ class ProjectController extends Controller
                 'ReferenceTable' => 'Project',
                 'ReferenceRecordID' => $projectId,
                 'Data' => json_encode($oldData),
-                'Note' => 'Project deleted (soft delete)'
+                'Note' => $request->Reason ?? 'Project deleted (soft delete)'
             ]);
 
             DB::commit();
@@ -1265,7 +1557,7 @@ class ProjectController extends Controller
     public function addMember(Request $request, $projectId)
     {
         $validator = Validator::make($request->all(), [
-            'UserID' => 'required|integer|exists:users,id',
+            'UserID' => 'required|integer|exists:User,UserID',
             'IsOwner' => 'required|boolean',
             'Title' => 'nullable|string|max:200',
         ]);
@@ -1282,6 +1574,7 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is owner
             $isOwner = ProjectMember::where('ProjectID', $projectId)
@@ -1290,7 +1583,7 @@ class ProjectController extends Controller
                 ->where('IsActive', true)
                 ->exists();
 
-            if (!$isOwner) {
+            if (!$isOwner && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only project owner can add members',
@@ -1384,6 +1677,7 @@ class ProjectController extends Controller
             'IsOwner' => 'nullable|boolean',
             'Title' => 'nullable|string|max:200',
             'IsActive' => 'nullable|boolean',
+            'Reason' => 'required'
         ]);
 
         if ($validator->fails()) {
@@ -1398,6 +1692,7 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is owner
             $isOwner = ProjectMember::where('ProjectID', $projectId)
@@ -1406,7 +1701,7 @@ class ProjectController extends Controller
                 ->where('IsActive', true)
                 ->exists();
 
-            if (!$isOwner) {
+            if (!$isOwner && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only project owner can edit members',
@@ -1425,6 +1720,35 @@ class ProjectController extends Controller
             }
 
             $oldData = $member->toArray();
+
+            // =========================
+            // 🔥 BUSINESS RULE CHECK
+            // =========================
+            if ($request->has('IsActive') && $request->IsActive === false) {
+
+                $hasBlockingTask = ProjectAssignMember::where(
+                        'ProjectAssignMember.ProjectMemberID',
+                        $memberId
+                    )
+                    ->join(
+                        'ProjectTask',
+                        'ProjectTask.ProjectTaskID',
+                        '=',
+                        'ProjectAssignMember.ProjectTaskID'
+                    )
+                    ->where('ProjectTask.ProjectID', $projectId)
+                    ->where('ProjectTask.IsDelete', false)
+                    ->where('ProjectTask.ProgressBar', '<', 100)
+                    ->exists();
+
+                if ($hasBlockingTask) {
+                    return response()->json([
+                        'success' => false,
+                        'message' =>
+                            'Member cannot be deactivated because there are unfinished active tasks assigned',
+                    ], 409);
+                }
+            }
 
             // Update member
             $updateData = [
@@ -1460,7 +1784,7 @@ class ProjectController extends Controller
                     'old' => $oldData,
                     'new' => $member->fresh()->toArray(),
                 ]),
-                'Note' => 'Project member updated'
+                'Note' => $request->Reasons ?? 'Project member updated'
             ]);
 
             DB::commit();
@@ -1490,8 +1814,8 @@ class ProjectController extends Controller
             'SequenceNo' => 'nullable|integer',
             'PriorityCode' => 'required|integer|in:1,2,3',
             'TaskDescription' => 'required|string|max:200',
-            'StartDate' => 'required|date',
-            'EndDate' => 'required|date|after_or_equal:StartDate',
+            'StartDate' => 'required|date_format:Y-m-d',
+            'EndDate' => 'required|date_format:Y-m-d|after_or_equal:StartDate',
             'ProgressBar' => 'nullable|numeric|min:0|max:100', // NEW   
             'Note' => 'nullable|string',
 
@@ -1506,7 +1830,7 @@ class ProjectController extends Controller
 
             // Assigned Members (based on UserID)
             'assignedMembers' => 'nullable|array',
-            'assignedMembers.*' => 'integer|exists:users,id',
+            'assignedMembers.*' => 'integer|exists:User,UserID',
         ]);
 
         if ($validator->fails()) {
@@ -1521,10 +1845,11 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is THE ONLY owner
             $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
-            if (!$ownerCheck['is_owner']) {
+            if (!$ownerCheck['is_owner'] && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => $ownerCheck['message'],
@@ -1687,8 +2012,290 @@ class ProjectController extends Controller
             'SequenceNo' => 'nullable|integer',
             'PriorityCode' => 'nullable|integer|in:1,2,3',
             'TaskDescription' => 'nullable|string|max:200',
-            'StartDate' => 'nullable|date',
-            'EndDate' => 'nullable|date',
+            'StartDate' => 'nullable|date_format:Y-m-d',
+            'EndDate' => 'nullable|date_format:Y-m-d',
+            'ProgressBar' => 'nullable|numeric|min:0|max:100',
+            'Note' => 'nullable|string',
+            'IsCheck' => 'nullable|boolean',
+
+            // Upload files
+            'files' => 'nullable|array',
+            'files.*.original_filename' => 'required|string|max:255',
+            'files.*.original_content_type' => 'required|string|max:100',
+            'files.*.original_file_size' => 'nullable|integer|min:1',
+            'files.*.has_converted_pdf' => 'required|boolean',
+            'files.*.converted_filename' => 'nullable|required_if:files.*.has_converted_pdf,true|string|max:255',
+            'files.*.converted_file_size' => 'nullable|integer|min:1',
+
+            // Delete files (OWNER only)
+            'delete_files' => 'nullable|array',
+            'delete_files.*' => 'integer',
+
+            // Re-assign (OWNER only)
+            'assignedMembers' => 'nullable|array',
+            'assignedMembers.*' => 'integer|exists:User,UserID',
+
+            'Reason' => 'nullable|string|max:200',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $authUserId = $request->auth_user_id;
+            $timestamp  = Carbon::now()->timestamp;
+            $user = $request->auth_user;
+
+            // =========================
+            // AUTH CHECK
+            // =========================
+            $access = $this->canUpdateTask($projectId, $taskId, $authUserId, $user);
+
+            if (!$access['allowed']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You are not allowed to update this task',
+                ], 403);
+            }
+
+            // =========================
+            // LOAD TASK
+            // =========================
+            $task = ProjectTask::where('ProjectTaskID', $taskId)
+                ->where('ProjectID', $projectId)
+                ->where('IsDelete', false)
+                ->first();
+
+            if (!$task) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Task not found',
+                ], 404);
+            }
+
+            $oldData = $task->toArray();
+
+            // =========================
+            // FILTER INPUT (🔥 SINGLE SOURCE)
+            // =========================
+            $filteredInput = $this->filterTaskUpdateData(
+                $request->all(),
+                $access['role']
+            );
+
+            if ($access['role'] === 'ASSIGNEE' && empty($filteredInput)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No permitted fields to 
+                    ',
+                ], 403);
+            }
+
+            // =========================
+            // DATE VALIDATION
+            // =========================
+            $newStartDate = $filteredInput['StartDate'] ?? $task->StartDate;
+            $newEndDate   = $filteredInput['EndDate'] ?? $task->EndDate;
+
+            $dateValidation = $this->validateTaskDates(
+                $projectId,
+                $newStartDate,
+                $newEndDate
+            );
+
+            if (!$dateValidation['valid']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $dateValidation['message'],
+                ], 422);
+            }
+
+            // =========================
+            // BUILD UPDATE DATA
+            // =========================
+            $updateData = [
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+            ];
+
+            foreach ($filteredInput as $field => $value) {
+                $updateData[$field] = $value;
+            }
+
+            // ProgressCode auto-calc
+            if (array_key_exists('ProgressBar', $filteredInput)) {
+                $updateData['ProgressCode'] = $this->calculateProgressCode(
+                    $filteredInput['ProgressBar'],
+                    $task->EndDate,
+                    $newEndDate
+                );
+            }
+
+            $task->update($updateData);
+
+            // =========================
+            // FILE UPLOAD (OWNER + ASSIGNEE)
+            // =========================
+            $uploadedFiles = [];
+
+            if (!empty($request->input('files'))) {
+
+                if (
+                    $access['role'] === 'ASSIGNEE'
+                    && !array_key_exists('ProgressBar', $filteredInput)
+                ) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Assignee must update progress when uploading work proof',
+                    ], 403);
+                }
+
+                foreach ($request->input('files') as $fileData) {
+                    $uploadedFiles[] = $this->handleTaskFileUpload(
+                        $projectId,
+                        $taskId,
+                        array_merge($fileData, [
+                            'uploaded_by_role' => $access['role'],
+                            'file_purpose' => $access['role'] === 'ASSIGNEE'
+                                ? 'WORK_PROOF'
+                                : 'ATTACHMENT',
+                        ]),
+                        $authUserId,
+                        $timestamp
+                    );
+                }
+            }
+
+            // =========================
+            // DELETE FILE (OWNER ONLY)
+            // =========================
+            if (
+                $access['role'] === 'OWNER'
+                && !empty($request->delete_files)
+            ) {
+                ProjectTaskFile::whereIn(
+                    'ProjectTaskFileID',
+                    $request->delete_files
+                )
+                    ->where('ProjectTaskID', $taskId)
+                    ->update([
+                        'IsDelete' => true,
+                        'AtTimeStamp' => $timestamp,
+                        'ByUserID' => $authUserId,
+                        'OperationCode' => 'D',
+                    ]);
+            }
+
+            // =========================
+            // UPDATE ASSIGNED MEMBERS (OWNER ONLY)
+            // =========================
+            $assignedMembers = [];
+            
+            if ($access['role'] === 'OWNER' && $request->has('assignedMembers')) {
+            
+                // 🔥 STEP 1: hapus semua assignment lama
+                ProjectAssignMember::where('ProjectTaskID', $taskId)->delete();
+            
+                // 🔥 STEP 2: insert assignment baru (jika ada)
+                if (!empty($request->assignedMembers)) {
+            
+                    // Ambil project member valid & aktif
+                    $members = ProjectMember::where('ProjectID', $projectId)
+                        ->whereIn('UserID', $request->assignedMembers)
+                        ->where('IsActive', true)
+                        ->get()
+                        ->keyBy('UserID');
+            
+                    foreach ($request->assignedMembers as $assignedUserId) {
+            
+                        if (!isset($members[$assignedUserId])) {
+                            continue; // skip user invalid / inactive
+                        }
+            
+                        $assignId = $timestamp . random_numbersu(5);
+            
+                        ProjectAssignMember::create([
+                            'ProjectAssignMemberID' => $assignId,
+                            'AtTimeStamp' => $timestamp,
+                            'ByUserID' => $authUserId,
+                            'OperationCode' => 'I',
+                            'ProjectMemberID' => $members[$assignedUserId]->ProjectMemberID,
+                            'ProjectTaskID' => $taskId,
+                        ]);
+            
+                        $assignedMembers[] = [
+                            'UserID' => $assignedUserId,
+                            'ProjectMemberID' => $members[$assignedUserId]->ProjectMemberID,
+                        ];
+                    }
+                }
+            }
+
+
+            // =========================
+            // AUDIT LOG
+            // =========================
+            $reason = $request->Reason
+                ?? ($access['role'] === 'ASSIGNEE'
+                    ? 'Progress updated with work proof'
+                    : 'Project task updated');
+
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+                'ReferenceTable' => 'ProjectTask',
+                'ReferenceRecordID' => $taskId,
+                'Data' => json_encode([
+                    'role' => $access['role'],
+                    'changed_fields' => array_keys($filteredInput),
+                    'uploaded_files' => count($uploadedFiles),
+                    'old' => $oldData,
+                    'new' => $task->fresh()->toArray(),
+                ]),
+                'Note' => $reason,
+            ]);
+
+            $this->updateProjectStatus($projectId);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Task updated successfully',
+                'data' => [
+                    'task' => $task->fresh(['files', 'assignments']),
+                    'uploaded_files' => $uploadedFiles,
+                ],
+            ], 200);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update task',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function oldupdateTask(Request $request, $projectId, $taskId)
+    {
+        $validator = Validator::make($request->all(), [
+            'ParentProjectTaskID' => 'nullable|integer',
+            'SequenceNo' => 'nullable|integer',
+            'PriorityCode' => 'nullable|integer|in:1,2,3',
+            'TaskDescription' => 'nullable|string|max:200',
+            'StartDate' => 'nullable|date_format:Y-m-d',
+            'EndDate' => 'nullable|date_format:Y-m-d',
             'ProgressBar' => 'nullable|numeric|min:0|max:100', // NEW
             'Note' => 'nullable|string',
             'IsCheck' => 'nullable|boolean',
@@ -1708,7 +2315,8 @@ class ProjectController extends Controller
 
             // Update Assigned Members (based on UserID)
             'assignedMembers' => 'nullable|array',
-            'assignedMembers.*' => 'integer|exists:users,id',
+            'assignedMembers.*' => 'integer|exists:User,UserID',
+            'Reason' => 'nullable|string'
         ]);
 
         if ($validator->fails()) {
@@ -1723,15 +2331,26 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is owner
-            $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
-            if (!$ownerCheck['is_owner']) {
+            // $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
+            // if (!$ownerCheck['is_owner']) {
+            //     return response()->json([
+            //         'success' => false,
+            //         'message' => $ownerCheck['message'],
+            //     ], 403);
+            // }
+
+            $access = $this->canUpdateTask($projectId, $taskId, $authUserId, $user);
+
+            if (!$access['allowed']) {
                 return response()->json([
                     'success' => false,
-                    'message' => $ownerCheck['message'],
+                    'message' => 'You are not allowed to update this task',
                 ], 403);
             }
+
 
 
             $task = ProjectTask::where('ProjectTaskID', $taskId)
@@ -1748,12 +2367,56 @@ class ProjectController extends Controller
 
             $oldData = $task->toArray();
 
+             // ----------------------------
+            // FILTER INPUT BY ROLE
+            // ----------------------------
+            $input = $this->filterTaskUpdateData($request->all(), $access['role']);
+
+            if ($access['role'] === 'ASSIGNEE' && empty($input)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No permitted fields to update',
+                ], 403);
+            }
+
+            // ----------------------------
+            // DATE VALIDATION (OWNER ONLY)
+            // ----------------------------
+            if ($access['role'] === 'OWNER') {
+                $newStartDate = $request->input('StartDate', $task->StartDate);
+                $newEndDate   = $request->input('EndDate', $task->EndDate);
+
+                $dateValidation = $this->validateTaskDates($projectId, $newStartDate, $newEndDate);
+                if (!$dateValidation['valid']) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => $dateValidation['message'],
+                    ], 422);
+                }
+            }
+
             // Update task
             $updateData = [
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
             ];
+
+             foreach ($input as $field => $value) {
+                $updateData[$field] = $value;
+            }
+
+            // ProgressCode auto-calc
+            if (array_key_exists('ProgressBar', $input)) {
+                $updateData['ProgressCode'] = $this->calculateProgressCode(
+                    $input['ProgressBar'],
+                    $task->EndDate,
+                    $task->EndDate
+                );
+            }
+
+            $task->update($updateData);
+
 
             // Validate dates if changed
             $newStartDate = $request->input('StartDate', $task->StartDate);
@@ -1893,7 +2556,7 @@ class ProjectController extends Controller
                     'deleted_files_count' => count($request->delete_files ?? []),
                     'assigned_members' => $assignedMembers,
                 ]),
-                'Note' => 'Project task updated'
+                'Note' => $request->Reason ?? 'Project task updated'
             ]);
 
             DB::commit();
@@ -1917,14 +2580,109 @@ class ProjectController extends Controller
     }
 
     /**
+     * Detail Project Task 
+     */
+
+    public function taskDetail(Request $request, int $project_id, int $task_id)
+    {
+        $authUserId = $request->auth_user_id;
+        $authUser = $request->auth_user;
+
+        // =========================
+        // CHECK PROJECT MEMBER
+        // =========================
+        $projectMember = ProjectMember::where('ProjectID', $project_id)
+            ->where('UserID', $authUserId)
+            ->where('IsActive', true)
+            ->first();
+
+        if (!$projectMember && !$authUser->IsAdministrator) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not a member of this project',
+            ], 403);
+        }
+
+        // =========================
+        // GET TASK
+        // =========================
+        $task = ProjectTask::where('ProjectID', $project_id)
+            ->where('ProjectTaskID', $task_id)
+            ->where('IsDelete', false)
+            ->first();
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Task not found',
+            ], 404);
+        }
+
+        // =========================
+        // ACCESS CONTROL
+        // =========================
+        $isOwnerOrAdmin = $projectMember->IsOwner || $authUser->IsAdministrator;
+
+        $isAssignee = ProjectAssignMember::where('ProjectTaskID', $task_id)
+            ->where('ProjectMemberID', $projectMember->ProjectMemberID)
+            ->exists();
+
+        if (!$isOwnerOrAdmin && !$isAssignee) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not allowed to view this task',
+            ], 403);
+        }
+
+        // =========================
+        // LOAD RELATIONS
+        // =========================
+        $task->load([
+            // ASSIGNEE
+            'assignments.projectMember.user',
+
+            // TASK FILES (PROGRESS FILE)
+            'files' => function ($q) {
+                $q->where('IsDelete', false)
+                  ->orderBy('AtTimeStamp', 'DESC');
+            },
+
+            // FILE UPLOADER
+            'files.uploader',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'task'       => $task,
+                'assignees'  => $task->assignMembers,
+                'files'      => $task->files,
+            ],
+        ], 200);
+    }
+
+    /**
      * Delete Project Task (Soft Delete)
      */
     public function deleteTask(Request $request, $projectId, $taskId)
     {
+          $validator = Validator::make($request->all(), [
+            'Reason' => 'required|string|max:200'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is owner
             $isOwner = ProjectMember::where('ProjectID', $projectId)
@@ -1933,8 +2691,8 @@ class ProjectController extends Controller
                 ->where('IsActive', true)
                 ->exists();
 
-            if (!$isOwner) {
-                return response()->json([
+            if (!$isOwner && !$user->IsAdministrator) {
+                return response()->json([   
                     'success' => false,
                     'message' => 'Only project owner can delete tasks',
                 ], 403);
@@ -1986,7 +2744,7 @@ class ProjectController extends Controller
                 'ReferenceTable' => 'ProjectTask',
                 'ReferenceRecordID' => $taskId,
                 'Data' => json_encode($oldData),
-                'Note' => 'Project task deleted (soft delete)'
+                'Note' => $request->Reason ?? 'Project task deleted (soft delete)'
             ]);
 
             DB::commit();
@@ -2011,7 +2769,7 @@ class ProjectController extends Controller
     public function addExpense(Request $request, $projectId)
     {
         $validator = Validator::make($request->all(), [
-            'ExpenseDate' => 'required|date',
+            'ExpenseDate' => 'required|date_format:Y-m-d',
             'ExpenseNote' => 'required|string|max:200',
             'CurrencyCode' => 'required|string|max:3',
             'ExpenseAmount' => 'required|numeric',
@@ -2038,6 +2796,7 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is member
             $isMember = ProjectMember::where('ProjectID', $projectId)
@@ -2045,7 +2804,7 @@ class ProjectController extends Controller
                 ->where('IsActive', true)
                 ->exists();
 
-            if (!$isMember) {
+            if (!$isMember && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only project members can add expenses',
@@ -2132,7 +2891,7 @@ class ProjectController extends Controller
     public function updateExpense(Request $request, $projectId, $expenseId)
     {
         $validator = Validator::make($request->all(), [
-            'ExpenseDate' => 'nullable|date',
+            'ExpenseDate' => 'nullable|date_format:Y-m-d',
             'ExpenseNote' => 'nullable|string|max:200',
             'CurrencyCode' => 'nullable|string|max:3',
             'ExpenseAmount' => 'nullable|numeric',
@@ -2150,6 +2909,7 @@ class ProjectController extends Controller
             // Files to Delete
             'delete_files' => 'nullable|array',
             'delete_files.*' => 'integer',
+            'Reason' => 'required|string|max:200'
         ]);
 
         if ($validator->fails()) {
@@ -2164,6 +2924,7 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is owner (for IsCheck) or member (for other fields)
             $member = ProjectMember::where('ProjectID', $projectId)
@@ -2171,7 +2932,7 @@ class ProjectController extends Controller
                 ->where('IsActive', true)
                 ->first();
 
-            if (!$member) {
+            if (!$member && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only project members can edit expenses',
@@ -2239,8 +3000,8 @@ class ProjectController extends Controller
 
             // Add new files
             $newExpenseFileUrls = [];
-            if ($request->has('files') && !empty($request->files)) {
-                foreach ($request->files as $fileData) {
+            if ($request->has('files') && !empty($request->input('files'))) {
+                foreach ($request->input('files') as $fileData) {
                     $fileResult = $this->handleExpenseFileUpload(
                         $projectId,
                         $expenseId,
@@ -2270,7 +3031,7 @@ class ProjectController extends Controller
                     'new_files_count' => count($newExpenseFileUrls),
                     'deleted_files_count' => count($request->delete_files ?? []),
                 ]),
-                'Note' => 'Project expense updated'
+                'Note' => $request->Reason ?? 'Project expense updated'
             ]);
 
             DB::commit();
@@ -2298,10 +3059,23 @@ class ProjectController extends Controller
      */
     public function deleteExpense(Request $request, $projectId, $expenseId)
     {
+          $validator = Validator::make($request->all(), [
+            'Reason' => 'required|string|max:200'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is owner
             $isOwner = ProjectMember::where('ProjectID', $projectId)
@@ -2310,7 +3084,7 @@ class ProjectController extends Controller
                 ->where('IsActive', true)
                 ->exists();
 
-            if (!$isOwner) {
+            if (!$isOwner && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only project owner can delete expenses',
@@ -2360,7 +3134,7 @@ class ProjectController extends Controller
                 'ReferenceTable' => 'ProjectExpense',
                 'ReferenceRecordID' => $expenseId,
                 'Data' => json_encode($oldData),
-                'Note' => 'Project expense deleted (soft delete)'
+                'Note' => $request->Reason ?? 'Project expense deleted (soft delete)'
             ]);
 
             DB::commit();
@@ -2380,6 +3154,65 @@ class ProjectController extends Controller
     }
 
     /**
+     * Detail Project Expense
+     */
+    public function expenseDetail(Request $request, int $project_id, int $expense_id)
+    {
+        $authUser = $request->auth_user;
+        $authUserId = $request->auth_user_id;
+
+        // =========================
+        // CHECK PROJECT MEMBER
+        // =========================
+        $projectMember = ProjectMember::where('ProjectID', $project_id)
+            ->where('UserID', $authUserId)
+            ->where('IsActive', true)
+            ->first();
+
+        if (!$projectMember && !$authUser->IsAdministrator) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not a member of this project',
+            ], 403);
+        }
+
+        // =========================
+        // GET EXPENSE
+        // =========================
+        $expense = ProjectExpense::where('ProjectID', $project_id)
+            ->where('ProjectExpenseID', $expense_id)
+            ->where('IsDelete', false)
+            ->first();
+
+        if (!$expense) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Expense not found',
+            ], 404);
+        }
+
+        // =========================
+        // LOAD FILES + UPLOADER
+        // =========================
+        $expense->load([
+            'files' => function ($q) {
+                $q->where('IsDelete', false)
+                  ->orderBy('AtTimeStamp', 'DESC');
+            },
+            'files.uploader',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'expense' => $expense,
+                'files'   => $expense->files,
+            ],
+        ], 200);
+    }
+
+
+    /**
      * Add MiniGoal
      */
     public function addMiniGoal(Request $request, $projectId)
@@ -2388,6 +3221,8 @@ class ProjectController extends Controller
             'SequenceNo' => 'nullable|integer',
             'MiniGoalDescription' => 'required|string|max:200',
             'MiniGoalCategoryCode' => 'required|in:1,2,3', // 1=$, 2=%, 3=#
+            'MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
+            'MiniGoalLastPrefixCode' => 'nullable|string|max:10',
             'TargetValue' => 'required|integer|min:0',
             'ActualValue' => 'nullable|integer|min:0',
         ]);
@@ -2404,10 +3239,11 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is owner
             $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
-            if (!$ownerCheck['is_owner']) {
+            if (!$ownerCheck['is_owner'] && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => $ownerCheck['message'],
@@ -2424,6 +3260,8 @@ class ProjectController extends Controller
                 'SequenceNo' => $request->SequenceNo,
                 'MiniGoalDescription' => $request->MiniGoalDescription,
                 'MiniGoalCategoryCode' => $request->MiniGoalCategoryCode,
+                'MiniGoalFirstPrefixCode' => $request->MiniGoalFirstPrefixCode ?? "",
+                'MiniGoalLastPrefixCode' => $request->MiniGoalLastPrefixCode ?? "",
                 'TargetValue' => $request->TargetValue,
                 'ActualValue' => $request->input('ActualValue', 0),
                 'IsDelete' => false,
@@ -2441,6 +3279,8 @@ class ProjectController extends Controller
                     'ProjectID' => $projectId,
                     'MiniGoalDescription' => $request->MiniGoalDescription,
                     'MiniGoalCategoryCode' => $request->MiniGoalCategoryCode,
+                    'MiniGoalFirstPrefixCode' => $request->MiniGoalFirstPrefixCode ?? "",
+                    'MiniGoalLastPrefixCode' => $request->MiniGoalLastPrefixCode ?? "", 
                     'TargetValue' => $request->TargetValue,
                     'ActualValue' => $request->input('ActualValue', 0),
                 ]),
@@ -2473,8 +3313,11 @@ class ProjectController extends Controller
             'SequenceNo' => 'nullable|integer',
             'MiniGoalDescription' => 'nullable|string|max:200',
             'MiniGoalCategoryCode' => 'nullable|in:1,2,3',
+            'MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
+            'MiniGoalLastPrefixCode' => 'nullable|string|max:10',
             'TargetValue' => 'nullable|integer|min:0',
             'ActualValue' => 'nullable|integer|min:0',
+            'Reason' => 'nullable|string|max:200'
         ]);
 
         if ($validator->fails()) {
@@ -2489,10 +3332,11 @@ class ProjectController extends Controller
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
 
             // Check if user is owner
             $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
-            if (!$ownerCheck['is_owner']) {
+            if (!$ownerCheck['is_owner'] && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => $ownerCheck['message'],
@@ -2527,6 +3371,12 @@ class ProjectController extends Controller
             if ($request->has('MiniGoalCategoryCode')) {
                 $updateData['MiniGoalCategoryCode'] = $request->MiniGoalCategoryCode;
             }
+            if ($request->has('MiniGoalFirstPrefixCode')) {
+                $updateData['MiniGoalFirstPrefixCode'] = $request->MiniGoalFirstPrefixCode;
+            }
+            if ($request->has('MiniGoalLastPrefixCode')) {
+                $updateData['MiniGoalLastPrefixCode'] = $request->MiniGoalLastPrefixCode;
+            }
             if ($request->has('TargetValue')) {
                 $updateData['TargetValue'] = $request->TargetValue;
             }
@@ -2548,7 +3398,7 @@ class ProjectController extends Controller
                     'old' => $oldData,
                     'new' => $miniGoal->fresh()->toArray(),
                 ]),
-                'Note' => 'Mini goal updated'
+                'Note' => $request->Reason ?? 'Mini goal updated'
             ]);
 
             DB::commit();
@@ -2573,13 +3423,27 @@ class ProjectController extends Controller
      */
     public function deleteMiniGoal(Request $request, $projectId, $miniGoalId)
     {
+          $validator = Validator::make($request->all(), [
+            'Reason' => 'required|string|max:200'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+
         DB::beginTransaction();
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
             // Check if user is owner
             $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
-            if (!$ownerCheck['is_owner']) {
+            if (!$ownerCheck['is_owner'] && !$user->IsAdministrator) {
                 return response()->json([
                     'success' => false,
                     'message' => $ownerCheck['message'],
@@ -2616,7 +3480,7 @@ class ProjectController extends Controller
                 'ReferenceTable' => 'MiniGoal',
                 'ReferenceRecordID' => $miniGoalId,
                 'Data' => json_encode($oldData),
-                'Note' => 'Mini goal deleted (soft delete)'
+                'Note' => $request->Reason ?? 'Mini goal deleted (soft delete)'
             ]);
 
             DB::commit();
@@ -2635,8 +3499,877 @@ class ProjectController extends Controller
         }
     }
 
+    /**
+     * List ProjectTask By Project (Global - Admin / Owner / Assignee)
+     */
+    public function projectTasks(Request $request, int $projectId)
+    {
+        $validator = Validator::make($request->all(), [
+            'UserID'      => 'nullable|array',
+            'UserID.*'    => 'integer|exists:User,UserID',
+            'StartDate'   => 'nullable|date_format:Y-m-d',
+            'EndDate'     => 'nullable|date_format:Y-m-d',
+            'IsCheck'     => 'nullable|boolean',
+            'per_page'    => 'nullable|integer|min:1|max:100',
+            'page'        => 'nullable|integer|min:1',
+        ]);
 
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
 
+        $authUser   = $request->auth_user;
+        $authUserId = $request->auth_user_id;
+        $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
+        $perPage    = $request->per_page ?? 10;
+        $page       = $request->page ?? 1;
+
+        // =========================
+        // PROJECT VALIDATION
+        // =========================
+        $project = Project::where('ProjectID', $projectId)
+            ->where('IsDelete', false)
+            ->first();
+
+        if (!$project) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Project not found',
+            ], 404);
+        }
+
+        // =========================
+        // NON ADMIN → MUST BE MEMBER
+        // =========================
+        if (!$isAdmin) {
+            $isMember = ProjectMember::where('ProjectID', $projectId)
+                ->where('UserID', $authUserId)
+                ->where('IsActive', true)
+                ->exists();
+
+            if (!$isMember) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You are not a member of this project',
+                ], 403);
+            }
+        }
+
+        // =========================
+        // BASE QUERY
+        // =========================
+        $query = ProjectTask::query()
+            ->select([
+                'ProjectTask.*',
+                'Project.ProjectName',
+            ])
+            ->join('Project', 'Project.ProjectID', '=', 'ProjectTask.ProjectID')
+            ->where('ProjectTask.ProjectID', $projectId)
+            ->where('ProjectTask.IsDelete', false);
+
+        // =========================
+        // USER FILTER (ADMIN / OWNER ONLY)
+        // =========================
+        if ($request->filled('UserID')) {
+
+            if (!$isAdmin) {
+                $isOwner = ProjectMember::where('ProjectID', $projectId)
+                    ->where('UserID', $authUserId)
+                    ->where('IsOwner', true)
+                    ->where('IsActive', true)
+                    ->exists();
+
+                if (!$isOwner) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Only admin or project owner can filter by user',
+                    ], 403);
+                }
+            }
+
+            $query->where(function ($q) use ($request) {
+
+                // creator / owner task
+                $q->whereIn('ProjectTask.CreatedBy', $request->UserID)
+
+                // assignee
+                ->orWhereExists(function ($sub) use ($request) {
+                    $sub->selectRaw(1)
+                        ->from('ProjectAssignMember as pam')
+                        ->join('ProjectMember as pm', 'pm.ProjectMemberID', '=', 'pam.ProjectMemberID')
+                        ->whereColumn('pam.ProjectTaskID', 'ProjectTask.ProjectTaskID')
+                        ->whereIn('pm.UserID', $request->UserID)
+                        ->where('pm.IsActive', true);
+                });
+            });
+        }
+
+        // =========================
+        // DATE FILTER (OVERLAP)
+        // =========================
+        if ($request->filled('StartDate') || $request->filled('EndDate')) {
+
+            if ($request->filled('StartDate')) {
+                $query->whereDate('ProjectTask.EndDate', '>=', $request->StartDate);
+            }
+
+            if ($request->filled('EndDate')) {
+                $query->whereDate('ProjectTask.StartDate', '<=', $request->EndDate);
+            }
+        }
+
+        // =========================
+        // IS CHECK FILTER
+        // =========================
+        if ($request->has('IsCheck')) {
+            $query->where('ProjectTask.IsCheck', $request->IsCheck);
+        }
+
+        // =========================
+        // PAGINATION
+        // =========================
+        $tasks = $query
+            ->orderBy('ProjectTask.StartDate', 'ASC')
+            ->orderBy('ProjectTask.AtTimeStamp', 'DESC')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        return response()->json([
+            'success' => true,
+            'project' => [
+                'ProjectID'   => $project->ProjectID,
+                'ProjectName' => $project->ProjectName,
+            ],
+            'data' => $tasks,
+        ]);
+    }
+
+    /**
+     * List MY ProjectTask (Global - Admin / Non-Admin)
+     */
+    public function byTasks(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'ProjectID'   => 'nullable|array',
+            'ProjectID.*' => 'integer',
+            'UserID'      => 'nullable|array',
+            'UserID.*'    => 'integer|exists:User,UserID',
+            'StartDate'   => 'nullable|date_format:Y-m-d',
+            'EndDate'     => 'nullable|date_format:Y-m-d',
+            'IsCheck'     => 'nullable|boolean',
+            'mode'        => 'nullable|in:OWNER,NON_OWNER,ALL',
+            'per_page'    => 'nullable|integer|min:1|max:100',
+            'page'        => 'nullable|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        $authUser   = $request->auth_user;
+        $authUserId = $request->auth_user_id;
+        $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
+        $perPage    = $request->per_page ?? 10;
+        $page       = $request->page ?? 1;
+        $mode       = $request->mode ?? 'ALL';
+
+        // =========================
+        // TARGET USER RESOLUTION
+        // =========================
+        if ($isAdmin && $request->filled('UserID')) {
+            $targetUserIds = $request->UserID;
+        } else {
+            $targetUserIds = [$authUserId];
+        }
+
+        // =========================
+        // BASE QUERY
+        // =========================
+        $query = ProjectTask::query()
+            ->select([
+                'ProjectTask.*',
+                'Project.ProjectName',
+            ])
+            ->join('Project', 'Project.ProjectID', '=', 'ProjectTask.ProjectID')
+            ->where('ProjectTask.IsDelete', false)
+            ->where('Project.IsDelete', false);
+
+        // =========================
+        // PROJECT FILTER
+        // =========================
+        if ($request->filled('ProjectID')) {
+            $query->whereIn('ProjectTask.ProjectID', $request->ProjectID);
+        }
+
+        // =========================
+        // MODE FILTER
+        // =========================
+        $query->where(function ($q) use ($mode, $targetUserIds) {
+
+            if ($mode === 'OWNER' || $mode === 'ALL') {
+                $q->whereIn('ProjectTask.CreatedBy', $targetUserIds);
+            }
+
+            if ($mode === 'NON_OWNER' || $mode === 'ALL') {
+                $q->orWhereExists(function ($sub) use ($targetUserIds) {
+                    $sub->selectRaw(1)
+                        ->from('ProjectAssignMember as pam')
+                        ->join('ProjectMember as pm', 'pm.ProjectMemberID', '=', 'pam.ProjectMemberID')
+                        ->whereColumn('pam.ProjectTaskID', 'ProjectTask.ProjectTaskID')
+                        ->whereIn('pm.UserID', $targetUserIds)
+                        ->where('pm.IsActive', true);
+                });
+            }
+        });
+
+        // =========================
+        // DATE FILTER (OVERLAP)
+        // =========================
+        if ($request->filled('StartDate') || $request->filled('EndDate')) {
+
+            if ($request->filled('StartDate')) {
+                $query->whereDate('ProjectTask.EndDate', '>=', $request->StartDate);
+            }
+
+            if ($request->filled('EndDate')) {
+                $query->whereDate('ProjectTask.StartDate', '<=', $request->EndDate);
+            }
+        }
+
+        // =========================
+        // IS CHECK
+        // =========================
+        if ($request->has('IsCheck')) {
+            $query->where('ProjectTask.IsCheck', $request->IsCheck);
+        }
+
+        // =========================
+        // PAGINATION
+        // =========================
+        $tasks = $query
+            ->orderBy('ProjectTask.StartDate', 'ASC')
+            ->orderBy('ProjectTask.AtTimeStamp', 'DESC')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        return response()->json([
+            'success' => true,
+            'mode'    => $mode,
+            'data'    => $tasks,
+        ]);
+    }
+
+    public function listAllTask(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+        'mode'       => 'required_unless:is_admin,true|in:OWNER,NON_OWNER,ALL',
+        'ProjectID'  => 'nullable|array',
+        'ProjectID.*'=> 'integer',
+        'UserID'     => 'nullable|integer|exists:User,UserID',
+        'SearchDate' => 'nullable|date_format:Y-m-d',
+        'StartDate'  => 'nullable|date_format:Y-m-d',
+        'EndDate'    => 'nullable|date_format:Y-m-d',
+        'IsCheck'    => 'nullable|boolean',
+        'per_page'   => 'nullable|integer|min:1|max:100',
+        'page'        => 'nullable|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $authUser   = $request->auth_user;
+        $authUserId = $request->auth_user_id;
+        $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
+        $mode       = $request->mode;
+        $perPage    = $request->per_page ?? 10;
+        $page       = $request->page ?? 1;
+
+        // =========================
+        // BASE QUERY (PROJECT TASK)
+        // =========================
+        $query = ProjectTask::query()
+            ->select([
+                'ProjectTask.*',
+                'Project.ProjectName',
+            ])
+            ->join(
+                'Project',
+                'Project.ProjectID',
+                '=',
+                'ProjectTask.ProjectID'
+            )
+            ->where('ProjectTask.IsDelete', false)
+            ->where('Project.IsDelete', false);
+
+        // =========================
+        // PROJECT FILTER
+        // =========================
+        if ($request->filled('ProjectID')) {
+            $query->whereIn('ProjectTask.ProjectID', $request->ProjectID);
+        }
+
+        // =========================
+        // ROLE FILTER
+        // =========================
+        if ($isAdmin) {
+            // ADMIN → ALL TASK
+            if ($request->filled('UserID')) {
+                // Filter by user involvement (owner OR assignee)
+                $query->where(function ($q) use ($request) {
+
+                    // Owner side
+                    $q->whereExists(function ($sub) use ($request) {
+                        $sub->selectRaw(1)
+                            ->from('ProjectMember as pm')
+                            ->whereColumn('pm.ProjectID', 'ProjectTask.ProjectID')
+                            ->where('pm.UserID', $request->UserID)
+                            ->where('pm.IsActive', true);
+                    })
+
+                    // Assignee side
+                    ->orWhereExists(function ($sub) use ($request) {
+                        $sub->selectRaw(1)
+                            ->from('ProjectAssignMember as pam')
+                            ->join(
+                                'ProjectMember as pm2',
+                                'pm2.ProjectMemberID',
+                                '=',
+                                'pam.ProjectMemberID'
+                            )
+                            ->whereColumn(
+                                'pam.ProjectTaskID',
+                                'ProjectTask.ProjectTaskID'
+                            )
+                            ->where('pm2.UserID', $request->UserID)
+                            ->where('pm2.IsActive', true);
+                    });
+                });
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+
+        } else {
+            // NON ADMIN
+            if(!$isAdmin) {
+                // 🔹 USER HARUS MEMBER PROJECT
+                $query->whereExists(function ($sub) use ($authUserId) {
+                    $sub->selectRaw(1)
+                        ->from('ProjectMember as pm')
+                        ->whereColumn('pm.ProjectID', 'ProjectTask.ProjectID')
+                        ->where('pm.UserID', $authUserId)
+                        ->where('pm.IsActive', true);
+                });
+
+                    if (!$request->filled('ProjectID')) {
+                        if ($mode === 'OWNER') {
+                        $query->whereExists(function ($sub) use ($authUserId) {
+                            $sub->selectRaw(1)
+                                ->from('ProjectMember')
+                                ->whereColumn(
+                                    'ProjectMember.ProjectID',
+                                    'ProjectTask.ProjectID'
+                                )
+                                ->where('ProjectMember.UserID', $authUserId)
+                                ->where('ProjectMember.IsOwner', true)
+                                ->where('ProjectMember.IsActive', true);
+                        });
+
+                    } else if($mode === "NON_OWNER") {
+                        $query->whereExists(function ($sub) use ($authUserId) {
+                            $sub->selectRaw(1)
+                                ->from('ProjectAssignMember as pam')
+                                ->join(
+                                    'ProjectMember as pm',
+                                    'pm.ProjectMemberID',
+                                    '=',
+                                    'pam.ProjectMemberID'
+                                )
+                                ->whereColumn(
+                                    'pam.ProjectTaskID',
+                                    'ProjectTask.ProjectTaskID'
+                                )
+                                ->where('pm.UserID', $authUserId)
+                                ->where('pm.IsActive', true);
+                        });
+                    } else {
+                         // 🔥 ALL (OWNER OR ASSIGNEE)
+                        $query->where(function ($q) use ($authUserId) {
+
+                            // OWNER SIDE
+                            $q->whereExists(function ($sub) use ($authUserId) {
+                                $sub->selectRaw(1)
+                                    ->from('ProjectMember')
+                                    ->whereColumn(
+                                        'ProjectMember.ProjectID',
+                                        'ProjectTask.ProjectID'
+                                    )
+                                    ->where('ProjectMember.UserID', $authUserId)
+                                    ->where('ProjectMember.IsActive', true);
+                            })
+
+                            // ASSIGNEE SIDE
+                            ->orWhereExists(function ($sub) use ($authUserId) {
+                                $sub->selectRaw(1)
+                                    ->from('ProjectAssignMember as pam')
+                                    ->join(
+                                        'ProjectMember as pm',
+                                        'pm.ProjectMemberID',
+                                        '=',
+                                        'pam.ProjectMemberID'
+                                    )
+                                    ->whereColumn(
+                                        'pam.ProjectTaskID',
+                                        'ProjectTask.ProjectTaskID'
+                                    )
+                                    ->where('pm.UserID', $authUserId)
+                                    ->where('pm.IsActive', true);
+                            });
+                        });
+                    }
+                }
+            }
+        }
+
+        // =========================
+        // DATE FILTER (OVERLAP LOGIC)
+        // =========================
+        $today = Carbon::today()->format('Y-m-d');
+
+        if ($request->filled('SearchDate')) {
+
+            $query->whereDate('ProjectTask.StartDate', '<=', $request->SearchDate)
+                  ->whereDate('ProjectTask.EndDate', '>=', $request->SearchDate);
+
+        } elseif ($request->filled('StartDate') || $request->filled('EndDate')) {
+
+            if ($request->filled('StartDate')) {
+                $query->whereDate('ProjectTask.EndDate', '>=', $request->StartDate);
+            }
+
+            if ($request->filled('EndDate')) {
+                $query->whereDate('ProjectTask.StartDate', '<=', $request->EndDate);
+            }
+
+        } else {
+
+            $query->whereDate('ProjectTask.StartDate', '<=', $today)
+                  ->whereDate('ProjectTask.EndDate', '>=', $today);
+        }
+
+        // =========================
+        // IsCheck FILTER
+        // =========================
+        if ($request->has('IsCheck')) {
+            $query->where('ProjectTask.IsCheck', $request->IsCheck);
+        }
+
+        // =========================
+        // PAGINATION
+        // =========================
+        $files = $query
+            ->orderBy('ProjectTask.StartDate', 'ASC')
+            ->orderBy('ProjectTask.AtTimeStamp', 'DESC')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        return response()->json([
+            'success' => true,
+            'role' => $isAdmin ? 'ADMIN' : $mode,
+            'data' => $files,
+        ], 200);
+    }
+
+    /**
+     * List ALL ProjectExpense (Global - Admin / Owner)
+     */
+    public function listAllExpense(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'mode'        => 'required_unless:is_admin,true|in:OWNER,NON_OWNER,ALL',
+            'ProjectID'   => 'nullable|array',
+            'ProjectID.*' => 'integer',
+            'UserID'      => 'nullable|integer|exists:User,UserID',
+            'SearchDate'  => 'nullable|date_format:Y-m-d',
+            'StartDate'   => 'nullable|date_format:Y-m-d',
+            'EndDate'     => 'nullable|date_format:Y-m-d',
+            'per_page'    => 'nullable|integer|min:1|max:100',
+            'page'        => 'nullable|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        $authUser   = $request->auth_user;
+        $authUserId = $request->auth_user_id;
+        $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
+        $mode       = $request->mode;
+        $perPage    = $request->per_page ?? 10;
+        $page       = $request->page ?? 1;
+
+        // =========================
+        // BASE QUERY (PROJECT EXPENSE)
+        // =========================
+        $query = ProjectExpense::query()
+            ->select([
+                'ProjectExpense.*',
+                'Project.ProjectName',
+            ])
+            ->join(
+                'Project',
+                'Project.ProjectID',
+                '=',
+                'ProjectExpense.ProjectID'
+            )
+            ->where('ProjectExpense.IsDelete', false)
+            ->where('Project.IsDelete', false);
+
+        // =========================
+        // PROJECT FILTER
+        // =========================
+        if ($request->filled('ProjectID')) {
+            $query->whereIn('ProjectExpense.ProjectID', $request->ProjectID);
+        }
+
+        // =========================
+        // ROLE FILTER
+        // =========================
+        if ($isAdmin) {
+
+            // ADMIN → wajib UserID
+            if ($request->filled('UserID')) {
+
+                $userId = $request->UserID;
+
+                $query->whereExists(function ($sub) use ($userId) {
+                    $sub->selectRaw(1)
+                        ->from('ProjectMember as pm')
+                        ->whereColumn('pm.ProjectID', 'ProjectExpense.ProjectID')
+                        ->where('pm.UserID', $userId)
+                        ->where('pm.IsActive', true);
+                });
+
+            } else {
+                // Admin tanpa UserID → kosong
+                $query->whereRaw('1 = 0');
+            }
+
+        } else {
+            // NON ADMIN
+            if ($mode === 'OWNER') {
+
+                $query->whereExists(function ($sub) use ($authUserId) {
+                    $sub->selectRaw(1)
+                        ->from('ProjectMember')
+                        ->whereColumn(
+                            'ProjectMember.ProjectID',
+                            'ProjectExpense.ProjectID'
+                        )
+                        ->where('ProjectMember.UserID', $authUserId)
+                        ->where('ProjectMember.IsOwner', true)
+                        ->where('ProjectMember.IsActive', true);
+                });
+
+            } else {
+
+                // NON OWNER → expense yang dibuat user tsb
+                $query->where('ProjectExpense.ByUserID', $authUserId);
+            }
+        }
+
+        // =========================
+        // DATE FILTER (OVERLAP LOGIC)
+        // =========================
+        $today = Carbon::today()->format('Y-m-d');
+
+        if ($request->filled('SearchDate')) {
+
+            $query->whereDate('ProjectExpense.ExpenseDate', $request->SearchDate);
+
+        } elseif ($request->filled('StartDate') || $request->filled('EndDate')) {
+
+            if ($request->filled('StartDate')) {
+                $query->whereDate('ProjectExpense.ExpenseDate', '>=', $request->StartDate);
+            }
+
+            if ($request->filled('EndDate')) {
+                $query->whereDate('ProjectExpense.ExpenseDate', '<=', $request->EndDate);
+            }
+
+        } else {
+
+            $query->whereDate('ProjectExpense.ExpenseDate', $today);
+        }
+
+        // =========================
+        // PAGINATION
+        // =========================
+        $expenses = $query
+            ->orderBy('ProjectExpense.ExpenseDate', 'DESC')
+            ->orderBy('ProjectExpense.AtTimeStamp', 'DESC')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        return response()->json([
+            'success' => true,
+            'role'    => $isAdmin ? 'ADMIN' : $mode,
+            'data'    => $expenses,
+        ], 200);
+    }
+
+    /**
+     * Get all project files grouped by category.
+     *
+     * GET /projects/{id}/files
+     */
+    public function projectFiles(Request $request, $projectId)
+    {
+        try {
+            $authUser   = $request->auth_user;
+            $authUserId = $request->auth_user_id;
+            $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
+    
+            // =========================
+            // ACCESS CHECK
+            // =========================
+            if (!$isAdmin) {
+                $isMember = ProjectMember::where('ProjectID', $projectId)
+                    ->where('UserID', $authUserId)
+                    ->where('IsActive', true)
+                    ->exists();
+    
+                if (!$isMember) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You are not allowed to access this project',
+                    ], 403);
+                }
+            }
+    
+            $type = strtolower((string) $request->query('type', 'all')); // task | expense | project | all
+            $today = Carbon::today()->format('Y-m-d');
+            $projectHeader = Project::query()
+                ->select(['ProjectID', 'StartDate', 'EndDate'])
+                ->where('ProjectID', $projectId)
+                ->where('IsDelete', false)
+                ->first();
+
+            if (!$projectHeader) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project not found',
+                ], 404);
+            }
+    
+            // =========================
+            // TASK FILES QUERY
+            // =========================
+            $taskFiles = collect();
+
+            if (in_array($type, ['task', 'all'], true)) {
+                $taskFiles = ProjectTaskFile::query()
+                    ->select([
+                        'ProjectTaskFileID as FileID',
+                        'ProjectTaskID as ReferenceID',
+                        'OriginalFileName as original_filename',
+                        'DocumentUrl as document_url',
+                        'DocumentOriginalUrl as document_original_url',
+                        'AtTimeStamp as at_timestamp',
+                        DB::raw("'task' as source_type"),
+                    ])
+                    ->join(
+                        'ProjectTask',
+                        'ProjectTask.ProjectTaskID',
+                        '=',
+                        'ProjectTaskFile.ProjectTaskID'
+                    )
+                    ->where('ProjectTask.ProjectID', $projectId)
+                    ->where('ProjectTask.IsDelete', false)
+                    ->where('ProjectTaskFile.IsDelete', false);
+    
+                // IsCheck filter (TASK ONLY)
+                if ($request->filled('is_check')) {
+                    $taskFiles->where(
+                        'ProjectTask.IsCheck',
+                        filter_var($request->is_check, FILTER_VALIDATE_BOOLEAN)
+                    );
+                }
+    
+                // DATE FILTER (overlap + default today)
+                $this->applyDateFilter(
+                    $taskFiles,
+                    'ProjectTask.StartDate',
+                    'ProjectTask.EndDate',
+                    $request,
+                    $today,
+                    optional($projectHeader->StartDate)->format('Y-m-d'),
+                    optional($projectHeader->EndDate)->format('Y-m-d')
+                );
+    
+                $taskFiles = $taskFiles->get();
+            }
+    
+            // =========================
+            // EXPENSE FILES QUERY
+            // =========================
+            $expenseFiles = collect();
+
+            if (in_array($type, ['expense', 'all'], true)) {
+                $expenseFiles = ProjectExpenseFile::query()
+                    ->select([
+                        'ProjectExpenseFileID as FileID',
+                        'ProjectExpenseID as ReferenceID',
+                        'OriginalFileName as original_filename',
+                        'DocumentUrl as document_url',
+                        'DocumentOriginalUrl as document_original_url',
+                        'AtTimeStamp as at_timestamp',
+                        DB::raw("'expense' as source_type"),
+                    ])
+                    ->join(
+                        'ProjectExpense',
+                        'ProjectExpense.ProjectExpenseID',
+                        '=',
+                        'ProjectExpenseFile.ProjectExpenseID'
+                    )
+                    ->where('ProjectExpense.ProjectID', $projectId)
+                    ->where('ProjectExpense.IsDelete', false)
+                    ->where('ProjectExpenseFile.IsDelete', false);
+    
+                $this->applyDateFilter(
+                    $expenseFiles,
+                    'ProjectExpense.ExpenseDate',
+                    'ProjectExpense.ExpenseDate',
+                    $request,
+                    $today,
+                    optional($projectHeader->StartDate)->format('Y-m-d'),
+                    optional($projectHeader->EndDate)->format('Y-m-d')
+                );
+
+                $expenseFiles = $expenseFiles->get();
+            }
+
+            // =========================
+            // PROJECT FILES QUERY
+            // =========================
+            $projectFiles = collect();
+
+            if (in_array($type, ['project', 'all'], true)) {
+                $projectFilesQuery = Project::query()
+                    ->select([
+                        'ProjectID as FileID',
+                        'ProjectID as ReferenceID',
+                        'ProjectName as original_filename',
+                        'DocumentUrl as document_url',
+                        'DocumentOriginalUrl as document_original_url',
+                        'AtTimeStamp as at_timestamp',
+                        DB::raw("'project' as source_type"),
+                    ])
+                    ->where('ProjectID', $projectId)
+                    ->where('IsDelete', false)
+                    ->whereNotNull('DocumentPath');
+
+                $this->applyDateFilter(
+                    $projectFilesQuery,
+                    'StartDate',
+                    'EndDate',
+                    $request,
+                    $today,
+                    optional($projectHeader->StartDate)->format('Y-m-d'),
+                    optional($projectHeader->EndDate)->format('Y-m-d')
+                );
+
+                $projectFiles = $projectFilesQuery->get();
+            }
+
+            // =========================
+            // SORT PER CATEGORY
+            // =========================
+            $taskFiles = $taskFiles->sortByDesc('at_timestamp')->values();
+            $expenseFiles = $expenseFiles->sortByDesc('at_timestamp')->values();
+            $projectFiles = $projectFiles->sortByDesc('at_timestamp')->values();
+
+            $totalFiles = $taskFiles->count()
+                + $expenseFiles->count()
+                + $projectFiles->count();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'project_id' => $projectId,
+                    'total_files' => $totalFiles,
+                    'categories' => [
+                        'task' => $taskFiles,
+                        'expense' => $expenseFiles,
+                        'project' => $projectFiles,
+                    ],
+                ],
+            ], 200);
+    
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch project files',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function applyDateFilter(
+        $query,
+        string $startDateColumn,
+        string $endDateColumn,
+        Request $request,
+        string $today,
+        ?string $defaultStartDate = null,
+        ?string $defaultEndDate = null
+    ): void
+    {
+        if ($request->filled('SearchDate')) {
+            $searchDate = $request->SearchDate;
+
+            $query->whereDate($startDateColumn, '<=', $searchDate)
+                ->whereDate($endDateColumn, '>=', $searchDate);
+            return;
+        }
+
+        if ($request->filled('StartDate') || $request->filled('EndDate')) {
+            $startDate = $request->StartDate;
+            $endDate = $request->EndDate;
+
+            if ($startDate && $endDate) {
+                $query->whereDate($startDateColumn, '<=', $endDate)
+                    ->whereDate($endDateColumn, '>=', $startDate);
+                return;
+            }
+
+            if ($startDate) {
+                $query->whereDate($endDateColumn, '>=', $startDate);
+            }
+
+            if ($endDate) {
+                $query->whereDate($startDateColumn, '<=', $endDate);
+            }
+            return;
+        }
+
+        if ($defaultStartDate && $defaultEndDate) {
+            $query->whereDate($startDateColumn, '<=', $defaultEndDate)
+                ->whereDate($endDateColumn, '>=', $defaultStartDate);
+            return;
+        }
+
+        $query->whereDate($startDateColumn, '<=', $today)
+            ->whereDate($endDateColumn, '>=', $today);
+    }
     /**
      * Handle Task File Upload - Generate Presigned URLs
      */
@@ -2661,7 +4394,7 @@ class ProjectController extends Controller
             // Generate presigned URL for PDF (original = converted)
             $pdfResult = $this->minioService->generatePresignedUploadUrl(
                 moduleName: 'Project',
-                moduleNameId: (string) $projectId . '/TASK',
+                moduleNameId: (string) $projectId . "/TASK/$taskId",
                 filename: $convertedFilename, // PDF dengan random string
                 contentType: $fileData['original_content_type'],
                 fileSize: $fileData['original_file_size'] ?? 0
@@ -2705,7 +4438,131 @@ class ProjectController extends Controller
             // Generate presigned URL for ORIGINAL file (DOCX, XLSX, etc)
             $originalResult = $this->minioService->generatePresignedUploadUrl(
                 moduleName: 'Project',
-                moduleNameId: (string) $projectId . '/TASK',
+                moduleNameId: (string) $projectId . "/TASK/$taskId",
+                filename: $originalFilename, // Original filename (e.g., report.xlsx)
+                contentType: $fileData['original_content_type'],
+                fileSize: $fileData['original_file_size'] ?? 0
+            );
+
+            $originalStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                . '/' . config('filesystems.disks.minio.bucket')
+                . '/' . $originalResult['file_info']['path'];
+
+            // Generate presigned URL for CONVERTED PDF
+            $convertedResult = $this->minioService->generatePresignedUploadUrl(
+                moduleName: 'Project',
+                moduleNameId: (string) $projectId . "/TASK/$taskId",
+                filename: $fileData['converted_filename'], // PDF filename dengan random string
+                contentType: 'application/pdf',
+                fileSize: $fileData['converted_file_size'] ?? 0
+            );
+
+            $convertedStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                . '/' . config('filesystems.disks.minio.bucket')
+                . '/' . $convertedResult['file_info']['path'];
+
+            // Create file record
+            ProjectTaskFile::create([
+                'ProjectTaskFileID' => $fileId,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $userId,
+                'OperationCode' => 'I',
+                'ProjectID' => $projectId,
+                'ProjectTaskID' => $taskId,
+                'OriginalFileName' => $originalFilename,
+                'ConvertedFileName' => pathinfo($fileData['converted_filename'], PATHINFO_FILENAME)
+                    . '-' . $randomString . '.pdf', // Add random string
+                'DocumentPath' => $convertedResult['file_info']['path'], // PDF path (for display)
+                'DocumentUrl' => $convertedStaticUrl, // PDF URL
+                'DocumentOriginalPath' => $originalResult['file_info']['path'], // Original file path
+                'DocumentOriginalUrl' => $originalStaticUrl, // Original file URL
+                'IsDelete' => false,
+            ]);
+
+            return [
+                'ProjectTaskFileID' => $fileId,
+                'OriginalFileName' => $originalFilename,
+                'ConvertedFileName' => pathinfo($fileData['converted_filename'], PATHINFO_FILENAME)
+                    . '-' . $randomString . '.pdf',
+                'pdf_upload_url' => $convertedResult['upload_url'],
+                'pdf_file_path' => $convertedResult['file_info']['path'],
+                'pdf_expires_in' => $convertedResult['expires_in'],
+                'original_upload_url' => $originalResult['upload_url'],
+                'original_file_path' => $originalResult['file_info']['path'],
+                'original_expires_in' => $originalResult['expires_in'],
+            ];
+        }
+    }
+
+    private function newhandleTaskFileUpload($projectId, $taskId, array $fileData, $userId, $timestamp)
+    {
+        $hasConvertedPdf = $fileData['has_converted_pdf'];
+        $originalFilename = $fileData['original_filename'];
+        $originalExtension = pathinfo($originalFilename, PATHINFO_EXTENSION);
+
+        // Generate random string untuk converted filename
+        $randomString = strtoupper(substr(md5(uniqid()), 0, 6));
+        $nameWithoutExt = pathinfo($originalFilename, PATHINFO_FILENAME);
+        $convertedFilename = $nameWithoutExt . '-' . $randomString . '.' . $originalExtension;
+
+        $fileTimestamp = Carbon::now()->timestamp;
+        $fileId = $fileTimestamp . random_numbersu(5);
+
+        // ========================================
+        // CASE 1: PDF Upload Only (No conversion)
+        // ========================================
+        $uploadedByRole = $fileData['uploaded_by_role'] ?? 'OWNER';
+        $filePurpose    = $fileData['file_purpose'] ?? 'ATTACHMENT';
+
+        if (!$hasConvertedPdf) {
+            // Generate presigned URL for PDF (original = converted)
+            $pdfResult = $this->minioService->generatePresignedUploadUrl(
+                moduleName: 'Project',
+                moduleNameId: (string) $projectId . '/TASK/'.$taskId,
+                filename: $convertedFilename, // PDF dengan random string
+                contentType: $fileData['original_content_type'],
+                fileSize: $fileData['original_file_size'] ?? 0
+            );
+
+            $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                . '/' . config('filesystems.disks.minio.bucket')
+                . '/' . $pdfResult['file_info']['path'];
+
+            // Create file record
+            ProjectTaskFile::create([
+                'ProjectTaskFileID' => $fileId,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $userId,
+                'OperationCode' => 'I',
+                'ProjectID' => $projectId,
+                'ProjectTaskID' => $taskId,
+                'OriginalFileName' => $originalFilename,
+                'ConvertedFileName' => $convertedFilename,
+                'DocumentPath' => $pdfResult['file_info']['path'], // PDF path (for display)
+                'DocumentUrl' => $pdfStaticUrl, // PDF URL
+                'DocumentOriginalPath' => $pdfResult['file_info']['path'], // Same as DocumentPath
+                'DocumentOriginalUrl' => $pdfStaticUrl, // Same as DocumentUrl
+                'IsDelete' => false,
+            ]);
+
+            return [
+                'ProjectTaskFileID' => $fileId,
+                'OriginalFileName' => $originalFilename,
+                'ConvertedFileName' => $convertedFilename,
+                'upload_url' => $pdfResult['upload_url'],
+                'file_path' => $pdfResult['file_info']['path'],
+                'expires_in' => $pdfResult['expires_in'],
+            ];
+        }
+
+        // ========================================
+        // CASE 2: Non-PDF Upload (Needs conversion)
+        // ========================================
+        else {
+            // Generate presigned URL for ORIGINAL file (DOCX, XLSX, etc)
+            $originalResult = $this->minioService->generatePresignedUploadUrl(
+                moduleName: 'Project',
+                moduleNameId: (string) $projectId . "/TASK/" . $taskId,
                 filename: $originalFilename, // Original filename (e.g., report.xlsx)
                 contentType: $fileData['original_content_type'],
                 fileSize: $fileData['original_file_size'] ?? 0
@@ -2785,7 +4642,7 @@ class ProjectController extends Controller
             // Generate presigned URL for PDF (original = converted)
             $pdfResult = $this->minioService->generatePresignedUploadUrl(
                 moduleName: 'Project',
-                moduleNameId: (string) $projectId . '/EXPENSE',
+                moduleNameId: (string) $projectId . "/EXPENSE/$expenseId",
                 filename: $convertedFilename, // PDF dengan random string
                 contentType: $fileData['original_content_type'],
                 fileSize: $fileData['original_file_size'] ?? 0
@@ -2829,7 +4686,7 @@ class ProjectController extends Controller
             // Generate presigned URL for ORIGINAL file (DOCX, XLSX, etc)
             $originalResult = $this->minioService->generatePresignedUploadUrl(
                 moduleName: 'Project',
-                moduleNameId: (string) $projectId . '/EXPENSE',
+                moduleNameId: (string) $projectId . "/EXPENSE/$expenseId",
                 filename: $originalFilename, // Original filename
                 contentType: $fileData['original_content_type'],
                 fileSize: $fileData['original_file_size'] ?? 0
@@ -2842,7 +4699,7 @@ class ProjectController extends Controller
             // Generate presigned URL for CONVERTED PDF
             $convertedResult = $this->minioService->generatePresignedUploadUrl(
                 moduleName: 'Project',
-                moduleNameId: (string) $projectId . '/EXPENSE',
+                moduleNameId: (string) $projectId . "/EXPENSE/$expenseId",
                 filename: $fileData['converted_filename'], // PDF filename
                 contentType: 'application/pdf',
                 fileSize: $fileData['converted_file_size'] ?? 0
@@ -3006,22 +4863,28 @@ class ProjectController extends Controller
         if (!$project) {
             return ['valid' => false, 'message' => 'Project not found'];
         }
+            // Normalize to DATE ONLY
+        $projectStart = Carbon::parse($project->StartDate)->toDateString();
+        $projectEnd   = Carbon::parse($project->EndDate)->toDateString();
 
-        if ($taskStartDate < $project->StartDate || $taskStartDate > $project->EndDate) {
+        $taskStart = Carbon::parse($taskStartDate)->toDateString();
+        $taskEnd   = Carbon::parse($taskEndDate)->toDateString();
+
+        if ($taskStart < $projectStart || $taskEnd > $projectEnd) {
             return [
                 'valid' => false,
                 'message' => "Task start date must be between project dates ({$project->StartDate} - {$project->EndDate})"
             ];
         }
 
-        if ($taskEndDate < $project->StartDate || $taskEndDate > $project->EndDate) {
+        if ($taskEnd < $projectStart || $taskEnd > $projectEnd) {
             return [
                 'valid' => false,
                 'message' => "Task end date must be between project dates ({$project->StartDate} - {$project->EndDate})"
             ];
         }
 
-        if ($taskEndDate < $taskStartDate) {
+        if ($taskEnd < $taskStart) {
             return ['valid' => false, 'message' => 'Task end date must be after or equal to start date'];
         }
 
@@ -3047,5 +4910,301 @@ class ProjectController extends Controller
         }
 
         return ['is_owner' => true, 'owner' => $owner];
+    }
+
+    private function canUpdateTask($projectId, $taskId, $userId, $user=null)
+    {
+        // OWNER
+        $isOwner = ProjectMember::where('ProjectID', $projectId)
+            ->where('UserID', $userId)
+            ->where('IsOwner', true)
+            ->where('IsActive', true)
+            ->exists();
+
+        if ($isOwner || $user->IsAdministrator) {
+            return [
+                'allowed' => true,
+                'role' => 'OWNER',
+            ];
+        }
+
+        // ASSIGNEE
+        $isAssignee = ProjectAssignMember::where('ProjectTaskID', $taskId)
+            ->whereExists(function ($q) use ($userId) {
+                $q->selectRaw(1)
+                    ->from('ProjectMember')
+                    ->whereColumn(
+                        'ProjectMember.ProjectMemberID',
+                        'ProjectAssignMember.ProjectMemberID'
+                    )
+                    ->where('ProjectMember.UserID', $userId)
+                    ->where('ProjectMember.IsActive', true);
+            })
+            ->exists();
+
+        if ($isAssignee) {
+            return [
+                'allowed' => true,
+                'role' => 'ASSIGNEE'
+            ];
+        }
+
+        return [
+            'allowed' => false,
+            'role' => null,
+        ];
+    }
+
+    private function filterTaskUpdateData(array $input, string $role): array
+    {
+        $ownerFields = [
+            'ParentProjectTaskID',
+            'SequenceNo',
+            'PriorityCode',
+            'TaskDescription',
+            'StartDate',
+            'EndDate',
+            'ProgressBar',
+            'Note',
+            'IsCheck',
+        ];
+
+        $assigneeFields = [
+            'ProgressBar',
+            'Note',
+        ];
+
+        if ($role === 'OWNER') {
+            return array_intersect_key($input, array_flip($ownerFields));
+        }
+
+        if ($role === 'ASSIGNEE') {
+            return array_intersect_key($input, array_flip($assigneeFields));
+        }
+
+        return [];
+    }
+
+    /**
+     * Handle Project Document Upload - Generate Presigned URLs
+     */
+    private function handleProjectFileUpload($projectId, $fileData, $userId, $timestamp)
+    {
+        $hasConvertedPdf = $fileData['has_converted_pdf'];
+        $originalFilename = $fileData['original_filename'];
+        $originalExtension = pathinfo($originalFilename, PATHINFO_EXTENSION);
+
+        // Generate random string untuk converted filename
+        $randomString = strtoupper(substr(md5(uniqid()), 0, 6));
+        $nameWithoutExt = pathinfo($originalFilename, PATHINFO_FILENAME);
+        $convertedFilename = $nameWithoutExt . '-' . $randomString . '.' . $originalExtension;
+
+        // ========================================
+        // CASE 1: PDF Upload Only (No conversion)
+        // ========================================
+        if (!$hasConvertedPdf) {
+            // Generate presigned URL for PDF (original = converted)
+            $pdfResult = $this->minioService->generatePresignedUploadUrl(
+                moduleName: 'Project',
+                moduleNameId: (string) $projectId . '/DOCUMENT',
+                filename: $convertedFilename, // PDF dengan random string
+                contentType: $fileData['original_content_type'],
+                fileSize: $fileData['original_file_size'] ?? 0
+            );
+
+            $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                . '/' . config('filesystems.disks.minio.bucket')
+                . '/' . $pdfResult['file_info']['path'];
+
+            // Update project dengan document path
+            Project::where('ProjectID', $projectId)->update([
+                'DocumentOriginalPath' => $pdfResult['file_info']['path'],
+                'DocumentOriginalUrl' => $pdfStaticUrl,
+                'DocumentPath' => $pdfResult['file_info']['path'],
+                'DocumentUrl' => $pdfStaticUrl,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $userId,
+                'OperationCode' => 'U',
+            ]);
+
+            return [
+                'ProjectDocumentID' => $projectId,
+                'OriginalFileName' => $originalFilename,
+                'ConvertedFileName' => $convertedFilename,
+                'original_upload_url' => $pdfResult['upload_url'],
+                'original_file_path' => $pdfResult['file_info']['path'],
+                'originalexpires_in' => $pdfResult['expires_in'],
+            ];
+        }
+
+        // ========================================
+        // CASE 2: Non-PDF Upload (Needs conversion)
+        // ========================================
+        else {
+            // Generate presigned URL for ORIGINAL file (DOCX, XLSX, etc)
+            $originalResult = $this->minioService->generatePresignedUploadUrl(
+                moduleName: 'Project',
+                moduleNameId: (string) $projectId . '/DOCUMENT',
+                filename: $originalFilename, // Original filename (e.g., report.xlsx)
+                contentType: $fileData['original_content_type'],
+                fileSize: $fileData['original_file_size'] ?? 0
+            );
+
+            $originalStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                . '/' . config('filesystems.disks.minio.bucket')
+                . '/' . $originalResult['file_info']['path'];
+
+            // Generate presigned URL for CONVERTED PDF
+            $convertedResult = $this->minioService->generatePresignedUploadUrl(
+                moduleName: 'Project',
+                moduleNameId: (string) $projectId . '/DOCUMENT',
+                filename: $fileData['converted_filename'], // PDF filename dengan random string
+                contentType: 'application/pdf',
+                fileSize: $fileData['converted_file_size'] ?? 0
+            );
+
+            $convertedStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                . '/' . config('filesystems.disks.minio.bucket')
+                . '/' . $convertedResult['file_info']['path'];
+
+            // Update project dengan document paths
+            Project::where('ProjectID', $projectId)->update([
+                'DocumentOriginalPath' => $originalResult['file_info']['path'],
+                'DocumentOriginalUrl' => $originalStaticUrl,
+                'DocumentPath' => $convertedResult['file_info']['path'],
+                'DocumentUrl' => $convertedStaticUrl,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $userId,
+                'OperationCode' => 'U',
+            ]);
+
+            return [
+                'ProjectDocumentID' => $projectId,
+                'OriginalFileName' => $originalFilename,
+                'ConvertedFileName' => pathinfo($fileData['converted_filename'], PATHINFO_FILENAME)
+                    . '-' . $randomString . '.pdf',
+                'pdf_upload_url' => $convertedResult['upload_url'],
+                'pdf_file_path' => $convertedResult['file_info']['path'],
+                'pdf_expires_in' => $convertedResult['expires_in'],
+                'original_upload_url' => $originalResult['upload_url'],
+                'original_file_path' => $originalResult['file_info']['path'],
+                'original_expires_in' => $originalResult['expires_in'],
+            ];
+        }
+    }
+
+    protected function handleProjectFileEdit(string $projectId,?array $fileData,bool $deleteFile,int $authUserId,int $timestamp): array 
+    {
+        $update = [];
+        $uploadResult = [];
+
+        // =====================
+        // DELETE FILE
+        // =====================
+        if ($deleteFile) {
+            $update = [
+                'DocumentOriginalPath' => null,
+                'DocumentOriginalUrl' => null,
+                'DocumentPath' => null,
+                'DocumentUrl' => null,
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+            ];
+        }
+        // =====================
+        // UPDATE FILE BARU
+        // =====================
+        elseif ($fileData) {
+            $hasConvertedPdf = $fileData['has_converted_pdf'];
+            $originalFilename = $fileData['original_filename'];
+
+            // CASE 1: PDF Upload Only (No conversion)
+            if (!$hasConvertedPdf) {
+                $pdfResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'Project',
+                    moduleNameId: (string) $projectId . '/DOCUMENT',
+                    filename: $originalFilename,
+                    contentType: $fileData['original_content_type'],
+                    fileSize: $fileData['original_file_size'] ?? 0
+                );
+
+                $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $pdfResult['file_info']['path'];
+
+                $update = [
+                    'DocumentOriginalPath' => $pdfResult['file_info']['path'],
+                    'DocumentOriginalUrl' => $pdfStaticUrl,
+                    'DocumentPath' => $pdfResult['file_info']['path'],
+                    'DocumentUrl' => $pdfStaticUrl,
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'U',
+                ];
+
+                $uploadResult = [
+                    'upload_url' => $pdfResult['upload_url'],
+                    'file_path' => $pdfResult['file_info']['path'],
+                    'expires_in' => $pdfResult['expires_in'],
+                ];
+            }
+            // CASE 2: Non-PDF Upload (Needs conversion)
+            else {
+                // Original file
+                $originalResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'Project',
+                    moduleNameId: (string) $projectId . '/DOCUMENT',
+                    filename: $originalFilename,
+                    contentType: $fileData['original_content_type'],
+                    fileSize: $fileData['original_file_size'] ?? 0
+                );
+
+                $originalStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $originalResult['file_info']['path'];
+
+                // Converted PDF
+                $convertedResult = $this->minioService->generatePresignedUploadUrl(
+                    moduleName: 'Project',
+                    moduleNameId: (string) $projectId . '/DOCUMENT',
+                    filename: $fileData['converted_filename'],
+                    contentType: 'application/pdf',
+                    fileSize: $fileData['converted_file_size'] ?? 0
+                );
+
+                $convertedStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                    . '/' . config('filesystems.disks.minio.bucket')
+                    . '/' . $convertedResult['file_info']['path'];
+
+                $update = [
+                    'DocumentOriginalPath' => $originalResult['file_info']['path'],
+                    'DocumentOriginalUrl' => $originalStaticUrl,
+                    'DocumentPath' => $convertedResult['file_info']['path'],
+                    'DocumentUrl' => $convertedStaticUrl,
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'U',
+                ];
+
+                $uploadResult = [
+                    'pdf_upload_url' => $convertedResult['upload_url'],
+                    'pdf_file_path' => $convertedResult['file_info']['path'],
+                    'pdf_expires_in' => $convertedResult['expires_in'],
+                    'original_upload_url' => $originalResult['upload_url'],
+                    'original_file_path' => $originalResult['file_info']['path'],
+                    'original_expires_in' => $originalResult['expires_in'],
+                ];
+            }
+        }
+
+        // =====================
+        // APPLY UPDATE
+        // =====================
+        if (!empty($update)) {
+            Project::where('ProjectID', $projectId)->update($update);
+        }
+
+        return $uploadResult;
     }
 }

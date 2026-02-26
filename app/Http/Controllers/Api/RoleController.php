@@ -45,6 +45,18 @@ class RoleController extends Controller
         $search = $request->input('search');
         $status = $request->input('status'); // active, inactive, all
 
+        /**
+         * 🔢 GLOBAL COUNTS (tidak terpengaruh filter & pagination)
+         */
+        $countActive = Role::where('IsDelete', false)
+            ->where('IsActive', true)
+            ->count();
+
+        $countInactive = Role::where('IsDelete', false)
+            ->where('IsActive', false)
+            ->count();
+
+
         $query = Role::query();
 
         if ($search) {
@@ -56,18 +68,41 @@ class RoleController extends Controller
 
         if ($status === 'active') {
             $query->active();
+            $query->where('IsDelete', false);
         } elseif ($status === 'inactive') {
             $query->where('IsActive', false);
+            $query->where('IsDelete', false);
         } else {
             $query->where('IsDelete', false);
         }
 
         $roles = $query->paginate($perPage);
 
+        $roleIds = $roles->getCollection()->pluck('RoleID')->filter();
+        $employeeCounts = collect();
+
+        if ($roleIds->isNotEmpty()) {
+            $employeeCounts = EmployeeRole::whereIn('RoleID', $roleIds)
+                ->active()
+                ->select('RoleID', DB::raw('COUNT(DISTINCT EmployeeID) as EmployeeCount'))
+                ->groupBy('RoleID')
+                ->pluck('EmployeeCount', 'RoleID');
+        }
+
+        $roles->getCollection()->transform(function ($role) use ($employeeCounts) {
+            $role->EmployeeCount = (int) ($employeeCounts[$role->RoleID] ?? 0);
+            return $role;
+        });
+
         return response()->json([
             'success' => true,
             'message' => 'Roles retrieved successfully',
-            'data' => $roles
+            'data' => $roles,
+            'summary' => [
+                'total_active'   => $countActive,
+                'total_inactive' => $countInactive,
+                'total_all'      => $countActive + $countInactive,
+            ]
         ], 200);
     }
 
@@ -435,15 +470,11 @@ class RoleController extends Controller
             // }
 
             // Clear cache for all employees with this role
-            $employeeRoles = EmployeeRole::where('RoleID', $id)->active()
+            EmployeeRole::where('RoleID', $id)
+                ->active()
+                ->distinct()
                 ->pluck('EmployeeID')
-                ->each(
-                    fn($empId) =>
-                    $this->permissionService->clearCache($empId)
-                );
-            foreach ($employeeRoles as $empRole) {
-                $this->permissionService->clearCache($empRole->EmployeeID);
-            }
+                ->each(fn($employeeId) => $this->permissionService->clearCache($employeeId));
 
             // Create audit log
             AuditLog::create([
@@ -746,6 +777,152 @@ class RoleController extends Controller
             'success' => true,
             'message' => 'Employee role retrieved successfully',
             'data' => $permissionDetails
+        ], 200);
+    }
+
+    /**
+     * Get users by role
+     * GET /api/roles/{roleId}/users
+     */
+    public function getUsersByRole(Request $request, $roleId)
+    {
+        $role = Role::find($roleId);
+
+        if (!$role) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Role not found'
+            ], 404);
+        }
+
+        $perPage = $request->input('per_page', 15);
+        $search = $request->input('search');
+        $status = $request->input('status', 'active'); // active, resigned, all
+
+        $employeeCount = EmployeeRole::where('RoleID', $roleId)
+            ->active()
+            ->distinct('EmployeeID')
+            ->count('EmployeeID');
+
+        $query = EmployeeRole::with(['employee.user', 'employee.organization', 'organization', 'position'])
+            ->where('RoleID', $roleId)
+            ->active();
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('EmployeeID', $search)
+                    ->orWhereHas('employee.user', function ($userQuery) use ($search) {
+                        $userQuery->where('FullName', 'like', "%{$search}%")
+                            ->orWhere('Email', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        if ($status === 'active') {
+            $query->whereHas('employee', function ($empQuery) {
+                $empQuery->active();
+            });
+        } elseif ($status === 'resigned') {
+            $query->whereHas('employee', function ($empQuery) {
+                $empQuery->whereNotNull('ResignDate');
+            });
+        }
+
+        $employeeRoles = $query->paginate($perPage);
+
+        $employeeRoles->getCollection()->transform(function ($empRole) {
+            $employee = $empRole->employee;
+            $user = $employee ? $employee->user : null;
+
+            return [
+                'EmployeeRoleID' => $empRole->EmployeeRoleID,
+                'EmployeeID' => $empRole->EmployeeID,
+                'FullName' => $user->FullName ?? null,
+                'Email' => $user->Email ?? null,
+                'OrganizationID' => $empRole->OrganizationID ?? $employee->OrganizationID ?? null,
+                'OrganizationName' => $empRole->organization->OrganizationName ?? $employee->organization->OrganizationName ?? null,
+                'PositionID' => $empRole->PositionID,
+                'PositionName' => $empRole->position->PositionName ?? null,
+                'GenderCode' => $employee->GenderCode ?? null,
+                'JoinDate' => $employee->JoinDate ?? null,
+                'ResignDate' => $employee->ResignDate ?? null,
+                'AssignedAt' => $empRole->AssignedAt,
+                'IsActive' => $empRole->IsActive,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Users retrieved successfully',
+            'data' => [
+                'Role' => [
+                    'RoleID' => $role->RoleID,
+                    'RoleName' => $role->RoleName,
+                    'Description' => $role->Description,
+                    'IsActive' => $role->IsActive,
+                    'EmployeeCount' => $employeeCount,
+                ],
+                'Users' => $employeeRoles
+            ]
+        ], 200);
+    }
+
+    /**
+     * Get employees without active role
+     * GET /api/roles/unassigned-employees
+     */
+    public function getEmployeesWithoutRole(Request $request)
+    {
+        $perPage = $request->input('per_page', 15);
+        $search = $request->input('search');
+        $status = $request->input('status', 'active'); // active, resigned, all
+
+        $query = Employee::with(['user', 'organization', 'currentPosition.position'])
+            ->whereDoesntHave('employeeRole');
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('EmployeeID', $search)
+                    ->orWhereHas('user', function ($userQuery) use ($search) {
+                        $userQuery->where('FullName', 'like', "%{$search}%")
+                            ->orWhere('Email', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        if ($status === 'active') {
+            $query->active();
+        } elseif ($status === 'resigned') {
+            $query->whereNotNull('ResignDate');
+        }
+
+        $employees = $query->paginate($perPage);
+
+        $employees->getCollection()->transform(function ($employee) {
+            $currentPosition = $employee->currentPosition;
+
+            return [
+                'EmployeeID' => $employee->EmployeeID,
+                'FullName' => $employee->user->FullName ?? null,
+                'Email' => $employee->user->Email ?? null,
+                'OrganizationID' => $employee->OrganizationID,
+                'OrganizationName' => $employee->organization->OrganizationName ?? null,
+                'CurrentPosition' => $currentPosition ? [
+                    'PositionID' => $currentPosition->PositionID,
+                    'PositionName' => $currentPosition->position->PositionName ?? null,
+                    'StartDate' => $currentPosition->StartDate,
+                ] : null,
+                'GenderCode' => $employee->GenderCode,
+                'JoinDate' => $employee->JoinDate,
+                'ResignDate' => $employee->ResignDate,
+                'IsActive' => is_null($employee->ResignDate),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Employees without role retrieved successfully',
+            'data' => $employees
         ], 200);
     }
 
