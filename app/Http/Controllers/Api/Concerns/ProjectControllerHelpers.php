@@ -16,6 +16,16 @@ use Illuminate\Support\Facades\DB;
 
 trait ProjectControllerHelpers
 {
+    private function getProjectStatusCode($projectId): ?string
+    {
+        return ProjectStatus::where('ProjectID', $projectId)->value('ProjectStatusCode');
+    }
+
+    private function isProjectVoid($projectId): bool
+    {
+        return $this->getProjectStatusCode($projectId) === '00';
+    }
+
     private function applyDateFilter(
         $query,
         string $startDateColumn,
@@ -441,6 +451,9 @@ trait ProjectControllerHelpers
     private function updateProjectStatus($projectId)
     {
         $status = ProjectStatus::where('ProjectID', $projectId)->first();
+        if (!$status) {
+            return;
+        }
 
         // Count members
         $totalMembers = ProjectMember::where('ProjectID', $projectId)
@@ -464,6 +477,14 @@ trait ProjectControllerHelpers
         $totalTasks = ProjectTask::where('ProjectID', $projectId)
             ->where('IsDelete', false)
             ->count();
+
+        $totalProgressBar = (float) ProjectTask::where('ProjectID', $projectId)
+            ->where('IsDelete', false)
+            ->sum('ProgressBar');
+
+        $averageProgress = $totalTasks > 0
+            ? round($totalProgressBar / $totalTasks, 2)
+            : 0;
 
         $totalTasksChecked = ProjectTask::where('ProjectID', $projectId)
             ->where('IsDelete', false)
@@ -496,8 +517,16 @@ trait ProjectControllerHelpers
             ->orderBy('AtTimeStamp', 'desc')
             ->first();
 
+        // Auto transition:
+        // if avg progress > 0 then ON-PROGRESS(11), except VOID/HOLD/COMPLETED.
+        $projectStatusCode = $status->ProjectStatusCode;
+        if (!in_array($projectStatusCode, ['00', '12', '99'], true)) {
+            $projectStatusCode = $averageProgress > 0 ? '11' : '10';
+        }
+
         // Update status
         $status->update([
+            'ProjectStatusCode' => $projectStatusCode,
             'TotalMember' => $totalMembers,
             'TotalTaskPriority1' => $tasksByPriority[1] ?? 0,
             'TotalTaskPriority2' => $tasksByPriority[2] ?? 0,

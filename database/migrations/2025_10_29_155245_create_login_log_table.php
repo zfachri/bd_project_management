@@ -16,7 +16,7 @@ return new class extends Migration
             $table->unsignedBigInteger('UserID');
             $table->boolean('IsSuccessful')->default(false);
             $table->bigInteger('LoginTimeStamp');
-            $table->string('LoginLocationJSON', 80)->nullable();
+            $table->json('LoginLocationJSON')->nullable();
         });
     }
 

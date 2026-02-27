@@ -281,6 +281,7 @@ Route::middleware(['jwt.auth'])->group(function () {
 
         Route::get('{projectId}', [ProjectController::class, 'show']); // Project detail
         Route::put('{projectId}', [ProjectController::class, 'update']); // Update project
+        Route::put('{projectId}/complete', [ProjectController::class, 'completeProject']); // Complete project
         Route::post('{projectId}/delete', [ProjectController::class, 'destroy']); // Soft delete
         Route::get('{projectId}/files', [ProjectController::class, 'projectFiles']); // Get project files
 

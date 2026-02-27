@@ -11,15 +11,15 @@ return new class extends Migration
         Schema::create('EmployeeRole', function (Blueprint $table) {
             $table->bigInteger('EmployeeRoleID')->primary();
             $table->bigInteger('AtTimeStamp');
-            $table->integer('ByUserID');
+            $table->unsignedBigInteger('ByUserID');
             $table->char('OperationCode', 1);
 
-            $table->bigInteger('EmployeeID');
-            $table->bigInteger('RoleID');
+            $table->unsignedBigInteger('EmployeeID');
+            $table->unsignedBigInteger('RoleID');
 
             // Scope (optional)
-            $table->integer('OrganizationID')->nullable();
-            $table->bigInteger('PositionID')->nullable();
+            $table->unsignedBigInteger('OrganizationID')->nullable();
+            $table->unsignedBigInteger('PositionID')->nullable();
 
             $table->boolean('IsActive')->default(true);
             $table->boolean('IsDelete')->default(false);

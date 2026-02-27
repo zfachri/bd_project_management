@@ -15,9 +15,9 @@ return new class extends Migration
             $table->bigInteger('ProjectMemberID')->primary();
             $table->bigInteger('ProjectID');
             $table->bigInteger('AtTimeStamp');
-            $table->bigInteger('ByUserID');
+            $table->unsignedBigInteger('ByUserID');
             $table->char('OperationCode', 1)->comment('I-INSERT; U-UPDATE');
-            $table->bigInteger('UserID');
+            $table->unsignedBigInteger('UserID');
             $table->boolean('IsActive')->default(true);
             $table->boolean('IsOwner')->default(false);
             $table->string('Title', 200)->nullable();
@@ -30,7 +30,7 @@ return new class extends Migration
             
             // Foreign keys
             $table->foreign('ProjectID')->references('ProjectID')->on('Project')->onDelete('cascade');
-            $table->foreign('UserID')->references('id')->on('User')->onDelete('cascade');
+            $table->foreign('UserID')->references('UserID')->on('User')->onDelete('cascade');
         });
     }
 

@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('MiniGoal', function (Blueprint $table) {
             $table->bigInteger('MiniGoalID')->primary();
             $table->bigInteger('AtTimeStamp');
-            $table->bigInteger('ByUserID');
+            $table->unsignedBigInteger('ByUserID');
             $table->char('OperationCode', 1)->comment('I-INSERT; U-UPDATE; D-DELETE');
             $table->bigInteger('ProjectID');
             $table->integer('SequenceNo')->nullable();

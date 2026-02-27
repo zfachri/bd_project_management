@@ -81,10 +81,10 @@ return new class extends Migration
         Schema::create('Permission', function (Blueprint $table) {
             $table->bigInteger('PermissionID')->primary();
             $table->bigInteger('AtTimeStamp');
-            $table->integer('ByUserID');
+            $table->unsignedBigInteger('ByUserID');
             $table->char('OperationCode', 1);
             
-            $table->bigInteger('RoleID');
+            $table->unsignedBigInteger('RoleID');
             $table->bigInteger('ModuleID');
             
             // Basic CRUD Permissions

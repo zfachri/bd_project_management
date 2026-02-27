@@ -17,7 +17,7 @@ return new class extends Migration
             $table->boolean('IsChangePassword')->default(true);
             $table->string('Salt', 36);
             $table->bigInteger('LastLoginTimeStamp')->nullable();
-            $table->string('LastLoginLocationJSON', 100)->nullable();
+            $table->json('LastLoginLocationJSON')->nullable();
             $table->integer('LastLoginAttemptCounter')->default(0);
         });
     }

@@ -6,8 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\ProjectControllerHelpers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
+use App\Models\Employee;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Models\ProjectMember;
@@ -16,6 +19,7 @@ use App\Models\ProjectTaskFile;
 use App\Models\ProjectExpense;
 use App\Models\ProjectExpenseFile;
 use App\Models\ProjectAssignMember;
+use App\Models\User;
 use App\Services\MinioService;
 use App\Models\AuditLog;
 use App\Models\MiniGoal;
@@ -213,6 +217,7 @@ class ProjectController extends Controller
             // 3. Create Project Members
             $memberMap = []; // Map UserID => ProjectMemberID
             $createdMembers = [];
+            $memberUserIdsForNotification = [];
 
             foreach ($request->input('members') as $memberData) {
                 $memberTimestamp = Carbon::now()->timestamp;
@@ -238,6 +243,8 @@ class ProjectController extends Controller
                     'IsOwner' => $memberData['IsOwner'],
                     'Title' => $memberData['Title'] ?? null,
                 ];
+
+                $memberUserIdsForNotification[] = (int) $memberData['UserID'];
             }
 
             // 4. Create MiniGoals (if any)
@@ -277,6 +284,7 @@ class ProjectController extends Controller
 
             // 5. Create Tasks (if any)
             $createdTasks = [];
+            $taskAssignmentNotifications = [];
             if ($request->has('tasks') && !empty($request->input('tasks'))) {
                 foreach ($request->input('tasks') as $taskIndex => $taskData) {
                     $taskTimestamp = Carbon::now()->timestamp;
@@ -378,6 +386,17 @@ class ProjectController extends Controller
                         'files' => $taskFileUrls,
                         'assignedMembers' => $assignedMembers,
                     ];
+
+                    if (!empty($assignedMembers)) {
+                        $taskAssignmentNotifications[] = [
+                            'task_id' => $taskId,
+                            'task_description' => $taskData['TaskDescription'],
+                            'member_ids' => array_values(array_unique(array_map(
+                                static fn($member) => (int) $member['UserID'],
+                                $assignedMembers
+                            ))),
+                        ];
+                    }
                 }
             }
 
@@ -456,6 +475,21 @@ class ProjectController extends Controller
             ]);
 
             DB::commit();
+
+            $this->sendProjectCreatedNotifications(
+                $project,
+                $memberUserIdsForNotification
+            );
+
+            foreach ($taskAssignmentNotifications as $assignmentNotification) {
+                $this->sendAssigneeNotification(
+                    $project,
+                    $assignmentNotification['task_id'],
+                    $assignmentNotification['task_description'],
+                    $assignmentNotification['member_ids'],
+                    'assigned'
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -975,6 +1009,7 @@ class ProjectController extends Controller
 
                         'Status' => [
                             'ProjectStatusCode'  => $project->status->ProjectStatusCode ?? null,
+                            'ProjectStatusName'  => ProjectStatus::nameFromCode($project->status->ProjectStatusCode ?? null),
                             'TotalMember'        => $project->status->TotalMember ?? 0,
                             'TotalTask'          => $project->status->TotalTask ?? 0,
                             'TotalExpense'       => $project->status->TotalExpense ?? 0,
@@ -1321,6 +1356,8 @@ class ProjectController extends Controller
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
 
+            $uploadResult = [];
+
             $project = Project::where('ProjectID', $projectId)
                 ->where('IsDelete', false)
                 ->first();
@@ -1330,6 +1367,23 @@ class ProjectController extends Controller
                     'success' => false,
                     'message' => 'Project not found',
                 ], 404);
+            }
+
+            $status = ProjectStatus::where('ProjectID', $projectId)->first();
+            $currentStatusCode = $status?->ProjectStatusCode;
+
+            if ($currentStatusCode === '00') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
+
+            if ($request->input('ProjectStatusCode') === '99') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Use completed endpoint to set project status as completed',
+                ], 422);
             }
 
             // Check if user is owner
@@ -1424,6 +1478,29 @@ class ProjectController extends Controller
                     'ProjectStatusCode' => $request->ProjectStatusCode,
                     'ProjectStatusReason' => $request->ProjectStatusReason ?? null,
                 ]);
+
+                // If HOLD (12) -> ON-PROGRESS (11), sync task deadlines that still need completion.
+                if (
+                    $currentStatusCode === '12'
+                    && $request->ProjectStatusCode === '11'
+                ) {
+                    $targetEndDate = $request->input('EndDate', $project->fresh()->EndDate);
+                    ProjectTask::where('ProjectID', $projectId)
+                        ->where('IsDelete', false)
+                        ->where(function ($q) {
+                            $q->where('ProgressBar', '<', 100)
+                                ->orWhere(function ($qq) {
+                                    $qq->where('ProgressBar', '>=', 100)
+                                        ->where('IsCheck', false);
+                                });
+                        })
+                        ->update([
+                            'EndDate' => $targetEndDate,
+                            'AtTimeStamp' => $timestamp,
+                            'ByUserID' => $authUserId,
+                            'OperationCode' => 'U',
+                        ]);
+                }
             }
 
             // Create Audit Log
@@ -1463,6 +1540,113 @@ class ProjectController extends Controller
     }
 
     /**
+     * Complete Project
+     */
+    public function completeProject(Request $request, $projectId)
+    {
+        $validator = Validator::make($request->all(), [
+            'ProjectStatusReason' => 'nullable|string|max:200',
+            'Reason' => 'required|string|max:200',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $authUserId = $request->auth_user_id;
+            $timestamp = Carbon::now()->timestamp;
+            $user = $request->auth_user;
+
+            $project = Project::where('ProjectID', $projectId)
+                ->where('IsDelete', false)
+                ->first();
+
+            if (!$project) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project not found',
+                ], 404);
+            }
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
+
+            $isOwner = ProjectMember::where('ProjectID', $projectId)
+                ->where('UserID', $authUserId)
+                ->where('IsOwner', true)
+                ->where('IsActive', true)
+                ->exists();
+
+            if (!$isOwner && !$user->IsAdministrator) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only project owner can complete project',
+                ], 403);
+            }
+
+            $incompleteOrUncheckedCount = ProjectTask::where('ProjectID', $projectId)
+                ->where('IsDelete', false)
+                ->where(function ($q) {
+                    $q->where('ProgressBar', '<', 100)
+                        ->orWhere('IsCheck', false);
+                })
+                ->count();
+
+            if ($incompleteOrUncheckedCount > 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project cannot be completed because some tasks are incomplete or unchecked',
+                    'remaining_task_count' => $incompleteOrUncheckedCount,
+                ], 422);
+            }
+
+            ProjectStatus::where('ProjectID', $projectId)->update([
+                'ProjectStatusCode' => '99',
+                'ProjectStatusReason' => $request->ProjectStatusReason ?? 'Project completed',
+            ]);
+
+            AuditLog::create([
+                'AuditLogID' => $timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+                'ReferenceTable' => 'ProjectStatus',
+                'ReferenceRecordID' => $projectId,
+                'Data' => json_encode([
+                    'ProjectID' => $projectId,
+                    'ProjectStatusCode' => '99',
+                    'ProjectStatusReason' => $request->ProjectStatusReason ?? 'Project completed',
+                ]),
+                'Note' => $request->Reason,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Project marked as completed',
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to complete project',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Delete Project (Soft Delete)
      */
     public function destroy(Request $request, $projectId)
@@ -1484,6 +1668,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
 
             $project = Project::where('ProjectID', $projectId)
                 ->where('IsDelete', false)
@@ -1578,6 +1769,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
 
             // Check if user is owner
             $isOwner = ProjectMember::where('ProjectID', $projectId)
@@ -1696,6 +1894,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
 
             // Check if user is owner
             $isOwner = ProjectMember::where('ProjectID', $projectId)
@@ -1850,6 +2055,13 @@ class ProjectController extends Controller
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
 
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
+
             // Check if user is THE ONLY owner
             $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
             if (!$ownerCheck['is_owner'] && !$user->IsAdministrator) {
@@ -1929,6 +2141,7 @@ class ProjectController extends Controller
 
             // Assign Members to Task (if any) - based on UserID
             $assignedMembers = [];
+            $assignedUserIdsForNotification = [];
             if ($request->has('assignedMembers') && !empty($request->assignedMembers)) {
                 // Get member map
                 $members = ProjectMember::where('ProjectID', $projectId)
@@ -1955,6 +2168,7 @@ class ProjectController extends Controller
                             'UserID' => $assignedUserId,
                             'ProjectMemberID' => $members[$assignedUserId]->ProjectMemberID,
                         ];
+                        $assignedUserIdsForNotification[] = (int) $assignedUserId;
                     }
                 }
             }
@@ -1985,6 +2199,16 @@ class ProjectController extends Controller
             ]);
 
             DB::commit();
+
+            if (!empty($assignedUserIdsForNotification)) {
+                $this->sendAssigneeNotification(
+                    Project::find($projectId),
+                    $taskId,
+                    $task->TaskDescription,
+                    $assignedUserIdsForNotification,
+                    'assigned'
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -2055,6 +2279,13 @@ class ProjectController extends Controller
             $timestamp  = Carbon::now()->timestamp;
             $user = $request->auth_user;
 
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
+
             // =========================
             // AUTH CHECK
             // =========================
@@ -2083,6 +2314,15 @@ class ProjectController extends Controller
             }
 
             $oldData = $task->toArray();
+            $oldProgressBar = (float) $task->ProgressBar;
+            $oldAssignedUserIds = ProjectAssignMember::query()
+                ->join('ProjectMember', 'ProjectMember.ProjectMemberID', '=', 'ProjectAssignMember.ProjectMemberID')
+                ->where('ProjectAssignMember.ProjectTaskID', $taskId)
+                ->pluck('ProjectMember.UserID')
+                ->map(static fn($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
 
             // =========================
             // FILTER INPUT (🔥 SINGLE SOURCE)
@@ -2095,9 +2335,21 @@ class ProjectController extends Controller
             if ($access['role'] === 'ASSIGNEE' && empty($filteredInput)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No permitted fields to 
-                    ',
+                    'message' => 'No permitted fields to update',
                 ], 403);
+            }
+
+            if (
+                $access['role'] === 'OWNER'
+                && array_key_exists('IsCheck', $filteredInput)
+                && (bool) $filteredInput['IsCheck'] === false
+                && $oldProgressBar >= 100
+                && !array_key_exists('ProgressBar', $filteredInput)
+            ) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'When rejecting checked task at 100% progress, ProgressBar input is required',
+                ], 422);
             }
 
             // =========================
@@ -2200,6 +2452,7 @@ class ProjectController extends Controller
             // UPDATE ASSIGNED MEMBERS (OWNER ONLY)
             // =========================
             $assignedMembers = [];
+            $newlyAssignedUserIds = [];
             
             if ($access['role'] === 'OWNER' && $request->has('assignedMembers')) {
             
@@ -2239,6 +2492,14 @@ class ProjectController extends Controller
                         ];
                     }
                 }
+
+                $newAssignedUserIds = array_values(array_unique(array_map(
+                    static fn($member) => (int) $member['UserID'],
+                    $assignedMembers
+                )));
+                $newlyAssignedUserIds = array_values(
+                    array_diff($newAssignedUserIds, $oldAssignedUserIds)
+                );
             }
 
 
@@ -2269,7 +2530,60 @@ class ProjectController extends Controller
 
             $this->updateProjectStatus($projectId);
 
+            $sendApprovalNotificationToOwner = (
+                $access['role'] === 'ASSIGNEE'
+                && array_key_exists('ProgressBar', $filteredInput)
+                && (float) $filteredInput['ProgressBar'] >= 100
+                && $oldProgressBar < 100
+            );
+
+            $sendRejectedNotificationToAssignee = (
+                $access['role'] === 'OWNER'
+                && array_key_exists('IsCheck', $filteredInput)
+                && (bool) $filteredInput['IsCheck'] === false
+                && $oldProgressBar >= 100
+            );
+
             DB::commit();
+
+            if (!empty($newlyAssignedUserIds)) {
+                $this->sendAssigneeNotification(
+                    Project::find($projectId),
+                    $taskId,
+                    $task->fresh()->TaskDescription,
+                    $newlyAssignedUserIds,
+                    'assigned'
+                );
+            }
+
+            if ($sendRejectedNotificationToAssignee) {
+                $assigneeUserIds = ProjectAssignMember::query()
+                    ->join('ProjectMember', 'ProjectMember.ProjectMemberID', '=', 'ProjectAssignMember.ProjectMemberID')
+                    ->where('ProjectAssignMember.ProjectTaskID', $taskId)
+                    ->pluck('ProjectMember.UserID')
+                    ->map(static fn($id) => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                if (!empty($assigneeUserIds)) {
+                    $this->sendAssigneeNotification(
+                        Project::find($projectId),
+                        $taskId,
+                        $task->fresh()->TaskDescription,
+                        $assigneeUserIds,
+                        'rejected'
+                    );
+                }
+            }
+
+            if ($sendApprovalNotificationToOwner) {
+                $this->sendOwnerApprovalNotification(
+                    Project::find($projectId),
+                    $taskId,
+                    $task->fresh()->TaskDescription
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -2335,6 +2649,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
 
             // Check if user is owner
             // $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
@@ -2687,6 +3008,13 @@ class ProjectController extends Controller
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
 
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
+
             // Check if user is owner
             $isOwner = ProjectMember::where('ProjectID', $projectId)
                 ->where('UserID', $authUserId)
@@ -2800,6 +3128,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
 
             // Check if user is member
             $isMember = ProjectMember::where('ProjectID', $projectId)
@@ -2928,6 +3263,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
 
             // Check if user is owner (for IsCheck) or member (for other fields)
             $member = ProjectMember::where('ProjectID', $projectId)
@@ -3079,6 +3421,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
 
             // Check if user is owner
             $isOwner = ProjectMember::where('ProjectID', $projectId)
@@ -3244,6 +3593,13 @@ class ProjectController extends Controller
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
 
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
+
             // Check if user is owner
             $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
             if (!$ownerCheck['is_owner'] && !$user->IsAdministrator) {
@@ -3336,6 +3692,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
 
             // Check if user is owner
             $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
@@ -3444,6 +3807,13 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+
+            if ($this->isProjectVoid($projectId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                ], 409);
+            }
             // Check if user is owner
             $ownerCheck = $this->checkSingleOwner($projectId, $authUserId);
             if (!$ownerCheck['is_owner'] && !$user->IsAdministrator) {
@@ -4323,6 +4693,125 @@ class ProjectController extends Controller
                 'message' => 'Failed to fetch project files',
                 'error' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    private function sendProjectCreatedNotifications(Project $project, array $memberIds): void
+    {
+        $emails = $this->resolveEmailsFromUserOrEmployeeIds($memberIds);
+        if (empty($emails)) {
+            return;
+        }
+
+        $subject = 'Project Baru Dibuat';
+        $body = "Project \"{$project->ProjectName}\" sudah dibuat dan Anda terdaftar sebagai member.";
+        $this->sendSimpleEmail($emails, $subject, $body);
+    }
+
+    private function sendAssigneeNotification(
+        ?Project $project,
+        $taskId,
+        string $taskDescription,
+        array $assigneeIds,
+        string $type = 'assigned'
+    ): void {
+        if (!$project) {
+            return;
+        }
+
+        $emails = $this->resolveEmailsFromUserOrEmployeeIds($assigneeIds);
+        if (empty($emails)) {
+            return;
+        }
+
+        if ($type === 'rejected') {
+            $subject = 'Task Ditolak Owner';
+            $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" ditolak owner. Silakan update progress kembali.";
+        } else {
+            $subject = 'Anda Mendapat Task Baru';
+            $body = "Anda ditugaskan pada task #{$taskId} ({$taskDescription}) di project \"{$project->ProjectName}\".";
+        }
+
+        $this->sendSimpleEmail($emails, $subject, $body);
+    }
+
+    private function sendOwnerApprovalNotification(?Project $project, $taskId, string $taskDescription): void
+    {
+        if (!$project) {
+            return;
+        }
+
+        $ownerUserId = ProjectMember::where('ProjectID', $project->ProjectID)
+            ->where('IsOwner', true)
+            ->where('IsActive', true)
+            ->value('UserID');
+
+        if (!$ownerUserId) {
+            return;
+        }
+
+        $emails = $this->resolveEmailsFromUserOrEmployeeIds([(int) $ownerUserId]);
+        if (empty($emails)) {
+            return;
+        }
+
+        $subject = 'Approval Task Diperlukan';
+        $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" sudah mencapai 100% dan menunggu pengecekan Anda.";
+        $this->sendSimpleEmail($emails, $subject, $body);
+    }
+
+    private function resolveEmailsFromUserOrEmployeeIds(array $ids): array
+    {
+        $normalizedIds = array_values(array_unique(array_map(static fn($id) => (int) $id, $ids)));
+        if (empty($normalizedIds)) {
+            return [];
+        }
+
+        $emails = User::whereIn('UserID', $normalizedIds)
+            ->pluck('Email')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $foundUserIds = User::whereIn('UserID', $normalizedIds)->pluck('UserID')->all();
+        $missingIds = array_values(array_diff($normalizedIds, array_map('intval', $foundUserIds)));
+
+        if (!empty($missingIds)) {
+            $employeeUserIds = Employee::whereIn('EmployeeID', $missingIds)
+                ->pluck('EmployeeID')
+                ->map(static fn($id) => (int) $id)
+                ->all();
+
+            if (!empty($employeeUserIds)) {
+                $employeeEmails = User::whereIn('UserID', $employeeUserIds)
+                    ->pluck('Email')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $emails = array_values(array_unique(array_merge($emails, $employeeEmails)));
+            }
+        }
+
+        return $emails;
+    }
+
+    private function sendSimpleEmail(array $emails, string $subject, string $body): void
+    {
+        foreach ($emails as $email) {
+            try {
+                Mail::raw($body, function ($message) use ($email, $subject) {
+                    $message->to($email)->subject($subject);
+                });
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send project email notification', [
+                    'email' => $email,
+                    'subject' => $subject,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
