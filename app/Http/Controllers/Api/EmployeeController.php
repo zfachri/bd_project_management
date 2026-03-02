@@ -246,7 +246,7 @@ class EmployeeController extends Controller
                 'IsAdministrator' => false, // IsAdministrator = 0
                 'FullName' => $request->FullName,
                 'Email' => $request->Email,
-                'Password' => Hash::make($request->Password . $salt),
+                'Password' => Hash::make($request->Password ?? "000000" . $salt),
                 'UTCCode' => $request->UTCCode ?? '+07:00',
             ]);
 

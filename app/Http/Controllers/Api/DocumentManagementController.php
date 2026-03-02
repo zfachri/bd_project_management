@@ -876,6 +876,185 @@ class DocumentManagementController extends Controller
         }
     }
 
+    /**
+     * List documents that have RACI activities by organization
+     * DocumentType is not restricted (can be any type).
+     */
+    public function listRaciByOrganization(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'organization_id' => 'nullable|integer|exists:Organization,OrganizationID',
+            'document_name'   => 'nullable|string|max:255',
+            'search'          => 'nullable|string|max:255',
+            'is_active'       => 'nullable|boolean',
+            'page'            => 'nullable|integer|min:1',
+            'per_page'        => 'nullable|integer|min:1|max:100',
+            'owned_page'      => 'nullable|integer|min:1',
+            'owned_per_page'  => 'nullable|integer|min:1|max:100',
+            'assigned_page'   => 'nullable|integer|min:1',
+            'assigned_per_page' => 'nullable|integer|min:1|max:100',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors'  => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $currentUser = $request->auth_user;
+            $isAdmin = (bool) $currentUser->IsAdministrator;
+
+            $employeeOrgId = null;
+            if (!$isAdmin) {
+                $employee = Employee::findOrFail($currentUser->UserID);
+                $employeeOrgId = $employee->OrganizationID;
+            }
+
+            if (!$isAdmin && $request->filled('organization_id') && (int) $request->input('organization_id') !== (int) $employeeOrgId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Non-admin can only query their own organization',
+                ], 403);
+            }
+
+            $targetOrgId = $isAdmin
+                ? ($request->filled('organization_id') ? (int) $request->input('organization_id') : null)
+                : (int) $employeeOrgId;
+
+            $withRelations = [
+                'latestVersion',
+                'organization',
+                'user',
+                'documentRoles',
+                'raciActivities.position.organization',
+                'raciActivities.position.positionLevel',
+            ];
+
+            $applyCommonFilters = function ($query) use ($request) {
+                $query->whereHas('raciActivities');
+
+                if ($request->filled('document_name')) {
+                    $query->where('DocumentName', 'LIKE', '%' . $request->input('document_name') . '%');
+                }
+
+                if ($request->filled('search')) {
+                    $search = $request->input('search');
+                    $query->where(function ($q) use ($search) {
+                        $q->where('DocumentName', 'LIKE', "%{$search}%")
+                            ->orWhere('DocumentType', 'LIKE', "%{$search}%")
+                            ->orWhere('Description', 'LIKE', "%{$search}%");
+                    });
+                }
+
+                if ($request->has('is_active')) {
+                    $query->where('IsActive', $request->boolean('is_active'));
+                }
+
+                return $query;
+            };
+
+            $ownedQuery = $applyCommonFilters(DocumentManagement::query()->with($withRelations));
+            if (!is_null($targetOrgId)) {
+                $ownedQuery->where('OrganizationID', $targetOrgId);
+            }
+
+            $assignedQuery = $applyCommonFilters(DocumentManagement::query()->with($withRelations));
+            if (!is_null($targetOrgId)) {
+                $assignedQuery
+                    ->where('OrganizationID', '!=', $targetOrgId)
+                    ->whereHas('documentRoles', function ($q) use ($targetOrgId) {
+                        $q->where('OrganizationID', $targetOrgId);
+                    });
+            } else {
+                $assignedQuery->whereRaw('1 = 0');
+            }
+
+            $defaultPerPage = (int) $request->input('per_page', 10);
+            $defaultPage = (int) $request->input('page', 1);
+            $ownedPerPage = (int) $request->input('owned_per_page', $defaultPerPage);
+            $assignedPerPage = (int) $request->input('assigned_per_page', $defaultPerPage);
+            $ownedPage = (int) $request->input('owned_page', $defaultPage);
+            $assignedPage = (int) $request->input('assigned_page', $defaultPage);
+
+            $ownedDocuments = $ownedQuery
+                ->orderBy('AtTimeStamp', 'desc')
+                ->paginate($ownedPerPage, ['*'], 'owned_page', $ownedPage);
+
+            $assignedDocuments = $assignedQuery
+                ->orderBy('AtTimeStamp', 'desc')
+                ->paginate($assignedPerPage, ['*'], 'assigned_page', $assignedPage);
+
+            $transformDocuments = function ($paginator) use ($isAdmin, $targetOrgId) {
+                $paginator->getCollection()->transform(function ($document) use ($isAdmin, $targetOrgId) {
+                    $isOwner = !is_null($targetOrgId) && (int) $document->OrganizationID === (int) $targetOrgId;
+
+                    $accessRole = null;
+                    if (!is_null($targetOrgId) && !$isOwner) {
+                        $accessRole = $document->documentRoles
+                            ->where('OrganizationID', $targetOrgId)
+                            ->first();
+                    }
+
+                    $latest = optional($document->latestVersion)->first();
+
+                    $document->latest_file = [
+                        'version_no' => $latest->VersionNo ?? null,
+                        'file_path'  => $latest->DocumentPath ?? null,
+                        'file_url'   => $latest->DocumentUrl ?? null,
+                    ];
+
+                    $document->access_info = [
+                        'is_admin' => $isAdmin,
+                        'reference_organization_id' => $targetOrgId,
+                        'is_owner' => $isOwner,
+                        'can_download' => $isAdmin ? true : ($isOwner ? true : ($accessRole->IsDownload ?? false)),
+                        'can_comment' => $isAdmin ? true : ($isOwner ? true : ($accessRole->IsComment ?? false)),
+                    ];
+
+                    return $document;
+                });
+
+                return $paginator;
+            };
+
+            $ownedDocuments = $transformDocuments($ownedDocuments);
+            $assignedDocuments = $transformDocuments($assignedDocuments);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'RACI documents retrieved successfully',
+                'data' => [
+                    'owned_documents' => $ownedDocuments->items(),
+                    'assigned_documents' => $assignedDocuments->items(),
+                ],
+                'meta' => [
+                    'reference_organization_id' => $targetOrgId,
+                    'owned' => [
+                        'current_page' => $ownedDocuments->currentPage(),
+                        'per_page' => $ownedDocuments->perPage(),
+                        'total' => $ownedDocuments->total(),
+                        'last_page' => $ownedDocuments->lastPage(),
+                    ],
+                    'assigned' => [
+                        'current_page' => $assignedDocuments->currentPage(),
+                        'per_page' => $assignedDocuments->perPage(),
+                        'total' => $assignedDocuments->total(),
+                        'last_page' => $assignedDocuments->lastPage(),
+                    ],
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve RACI documents',
+                'error'   => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function inactiveDocument(Request $request, $documentId)
     {
         DB::beginTransaction();
@@ -1645,6 +1824,317 @@ class DocumentManagementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to add RACI activities',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update/Delete RACI activities in a document.
+     * - Update: change PIC, Activity, and/or Status
+     * - Delete: remove selected RACI activities
+     */
+    public function updateRaciActivities(Request $request, $documentId)
+    {
+        $validator = Validator::make($request->all(), [
+            'organization_id' => 'required|integer|exists:Organization,OrganizationID',
+            'raci_updates' => 'nullable|array|min:1',
+            'raci_updates.*.raci_activity_id' => 'required_with:raci_updates|integer|exists:RaciActivity,RaciActivityID',
+            'raci_updates.*.activity' => 'nullable|string|max:255',
+            'raci_updates.*.pic' => 'nullable|integer|exists:Position,PositionID',
+            'raci_updates.*.status' => 'nullable|in:' . implode(',', RaciActivity::getStatuses()),
+            'raci_delete_ids' => 'nullable|array|min:1',
+            'raci_delete_ids.*' => 'integer|exists:RaciActivity,RaciActivityID',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        if (!$request->filled('raci_updates') && !$request->filled('raci_delete_ids')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'At least one of raci_updates or raci_delete_ids is required'
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $authUserId = $request->auth_user_id;
+            $organizationId = (int) $request->input('organization_id');
+            $timestamp = Carbon::now()->timestamp;
+
+            $document = DocumentManagement::with('documentRoles')
+                ->active()
+                ->findOrFail($documentId);
+
+            $isOwner = (int) $document->OrganizationID === $organizationId;
+            if (!$isOwner) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only document owner can update RACI activities'
+                ], 403);
+            }
+
+            $allowedOrgIds = [$document->OrganizationID];
+            $documentRoleOrgIds = $document->documentRoles
+                ->pluck('OrganizationID')
+                ->toArray();
+            $allowedOrgIds = array_values(array_unique(array_merge($allowedOrgIds, $documentRoleOrgIds)));
+
+            $updatedActivities = [];
+            $deletedActivities = [];
+
+            $raciUpdates = $request->input('raci_updates', []);
+            foreach ($raciUpdates as $idx => $updateData) {
+                $raci = RaciActivity::where('DocumentManagementID', $documentId)
+                    ->where('RaciActivityID', $updateData['raci_activity_id'])
+                    ->first();
+
+                if (!$raci) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'RACI activity not found in this document',
+                        'errors' => [
+                            'raci_updates' => [
+                                "Item index {$idx} is invalid for this document"
+                            ]
+                        ]
+                    ], 422);
+                }
+
+                $payload = [];
+                if (array_key_exists('activity', $updateData) && !is_null($updateData['activity'])) {
+                    $payload['Activity'] = $updateData['activity'];
+                }
+                if (array_key_exists('status', $updateData) && !is_null($updateData['status'])) {
+                    $payload['Status'] = $updateData['status'];
+                }
+                if (array_key_exists('pic', $updateData) && !is_null($updateData['pic'])) {
+                    $position = Position::with('organization')->find($updateData['pic']);
+                    if (!$position) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Position not found',
+                            'errors' => [
+                                'raci_updates' => [
+                                    "PIC on item index {$idx} is invalid"
+                                ]
+                            ]
+                        ], 422);
+                    }
+
+                    if (!in_array((int) $position->OrganizationID, $allowedOrgIds, true)) {
+                        DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'PIC organization is not allowed for this document',
+                            'errors' => [
+                                'raci_updates' => [
+                                    "PIC organization on item index {$idx} is outside document access list"
+                                ]
+                            ],
+                            'allowed_organization_ids' => $allowedOrgIds
+                        ], 422);
+                    }
+
+                    $payload['PIC'] = (int) $updateData['pic'];
+                }
+
+                if (empty($payload)) {
+                    continue;
+                }
+
+                $old = [
+                    'RaciActivityID' => $raci->RaciActivityID,
+                    'Activity' => $raci->Activity,
+                    'PIC' => $raci->PIC,
+                    'Status' => $raci->Status,
+                ];
+
+                $raci->update($payload);
+                $raci->refresh();
+
+                $updatedActivities[] = [
+                    'old' => $old,
+                    'new' => [
+                        'RaciActivityID' => $raci->RaciActivityID,
+                        'Activity' => $raci->Activity,
+                        'PIC' => $raci->PIC,
+                        'Status' => $raci->Status,
+                    ],
+                ];
+            }
+
+            $deleteIds = array_values(array_unique($request->input('raci_delete_ids', [])));
+            if (!empty($deleteIds)) {
+                $toDelete = RaciActivity::where('DocumentManagementID', $documentId)
+                    ->whereIn('RaciActivityID', $deleteIds)
+                    ->get();
+
+                if ($toDelete->count() !== count($deleteIds)) {
+                    $foundIds = $toDelete->pluck('RaciActivityID')->map(fn($id) => (int) $id)->toArray();
+                    $missingIds = array_values(array_diff($deleteIds, $foundIds));
+
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Some RACI activities are not part of this document',
+                        'errors' => [
+                            'missing_raci_activity_ids' => $missingIds
+                        ]
+                    ], 422);
+                }
+
+                $deletedActivities = $toDelete->map(function ($item) {
+                    return [
+                        'RaciActivityID' => $item->RaciActivityID,
+                        'Activity' => $item->Activity,
+                        'PIC' => $item->PIC,
+                        'Status' => $item->Status,
+                    ];
+                })->values()->toArray();
+
+                RaciActivity::where('DocumentManagementID', $documentId)
+                    ->whereIn('RaciActivityID', $deleteIds)
+                    ->delete();
+            }
+
+            if (!empty($updatedActivities)) {
+                AuditLog::create([
+                    'AuditLogID' => $timestamp . random_numbersu(5),
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'U',
+                    'ReferenceTable' => 'RaciActivity',
+                    'ReferenceRecordID' => $documentId,
+                    'Data' => json_encode([
+                        'DocumentManagementID' => $documentId,
+                        'DocumentName' => $document->DocumentName,
+                        'UpdatedRaciActivities' => $updatedActivities,
+                    ]),
+                    'Note' => 'RACI activities updated'
+                ]);
+            }
+
+            if (!empty($deletedActivities)) {
+                AuditLog::create([
+                    'AuditLogID' => ($timestamp + 1) . random_numbersu(5),
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'D',
+                    'ReferenceTable' => 'RaciActivity',
+                    'ReferenceRecordID' => $documentId,
+                    'Data' => json_encode([
+                        'DocumentManagementID' => $documentId,
+                        'DocumentName' => $document->DocumentName,
+                        'DeletedRaciActivities' => $deletedActivities,
+                    ]),
+                    'Note' => 'RACI activities deleted'
+                ]);
+            }
+
+            DB::commit();
+
+            $latestRaci = RaciActivity::with('position.organization')
+                ->where('DocumentManagementID', $documentId)
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'RACI activities updated successfully',
+                'data' => [
+                    'document_id' => (int) $documentId,
+                    'updated_count' => count($updatedActivities),
+                    'deleted_count' => count($deletedActivities),
+                    'raci_activities' => $latestRaci,
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update RACI activities',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get audit log details by reference table and record id.
+     * Current allowed reference tables: DocumentManagement, RaciActivity.
+     */
+    public function getAuditLogDetailsByReference(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'reference_table' => 'required|string|in:DocumentManagement,RaciActivity,RaciAcitivity',
+            'reference_record_id' => 'required|integer',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $referenceTable = $request->input('reference_table');
+            if ($referenceTable === 'RaciAcitivity') {
+                $referenceTable = 'RaciActivity';
+            }
+            $referenceRecordId = (int) $request->input('reference_record_id');
+
+            $logs = AuditLog::with('user')
+                ->where('ReferenceTable', $referenceTable)
+                ->where('ReferenceRecordID', $referenceRecordId)
+                ->orderBy('AtTimeStamp', 'desc')
+                ->get()
+                ->map(function ($log) {
+                    $decoded = null;
+                    if (!empty($log->Data)) {
+                        $decoded = json_decode($log->Data, true);
+                    }
+
+                    return [
+                        'audit_log_id' => $log->AuditLogID,
+                        'timestamp' => $log->AtTimeStamp,
+                        'timestamp_formatted' => Carbon::createFromTimestamp($log->AtTimeStamp)->format('Y-m-d H:i:s'),
+                        'operation_code' => $log->OperationCode,
+                        'reference_table' => $log->ReferenceTable,
+                        'reference_record_id' => $log->ReferenceRecordID,
+                        'note' => $log->Note,
+                        'data' => $decoded,
+                        'actor' => [
+                            'user_id' => optional($log->user)->UserID,
+                            'username' => optional($log->user)->Username ?? null,
+                            'name' => optional($log->user)->Name ?? null,
+                        ],
+                    ];
+                });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Audit log details retrieved successfully',
+                'data' => [
+                    'reference_table' => $referenceTable,
+                    'reference_record_id' => $referenceRecordId,
+                    'total_logs' => $logs->count(),
+                    'logs' => $logs,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve audit log details',
                 'error' => $e->getMessage()
             ], 500);
         }

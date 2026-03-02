@@ -305,16 +305,14 @@ class ProjectController extends Controller
                         ], 422);
                     }
 
-                    // Calculate ProgressCode based on ProgressBar
+                    // Calculate ProgressCode based on ProgressBar + IsCheck
                     $progressBar = $taskData['ProgressBar'] ?? 0;
-
-                    if ($progressBar >= 100) {
-                        $progressCode = 2; // COMPLETED
-                    } elseif ($progressBar > 0) {
-                        $progressCode = 1; // ON-PROGRESS
-                    } else {
-                        $progressCode = 0; // INITIAL
-                    }
+                    $progressCode = $this->calculateProgressCode(
+                        $progressBar,
+                        false,
+                        $taskData['EndDate'],
+                        $taskData['EndDate']
+                    );
 
                     $task = ProjectTask::create([
                         'ProjectTaskID' => $taskId,
@@ -2060,20 +2058,14 @@ class ProjectController extends Controller
                 ], 422);
             }
 
-            // Calculate ProgressCode based on ProgressBar
+            // Calculate ProgressCode based on ProgressBar + IsCheck
             $progressBar = $request->input('ProgressBar', 0);
-
-            // For new task, ProgressCode logic:
-            // - If ProgressBar = 0 → INITIAL (0)
-            // - If 0 < ProgressBar < 100 → ON-PROGRESS (1)
-            // - If ProgressBar = 100 → COMPLETED (2)
-            if ($progressBar >= 100) {
-                $progressCode = 2; // COMPLETED
-            } elseif ($progressBar > 0) {
-                $progressCode = 1; // ON-PROGRESS
-            } else {
-                $progressCode = 0; // INITIAL
-            }
+            $progressCode = $this->calculateProgressCode(
+                $progressBar,
+                false,
+                $request->EndDate,
+                $request->EndDate
+            );
 
 
             // Create task
@@ -2360,9 +2352,21 @@ class ProjectController extends Controller
             }
 
             // ProgressCode auto-calc
-            if (array_key_exists('ProgressBar', $filteredInput)) {
+            if (
+                array_key_exists('ProgressBar', $filteredInput)
+                || array_key_exists('IsCheck', $filteredInput)
+                || array_key_exists('EndDate', $filteredInput)
+            ) {
+                $progressBarForCalc = array_key_exists('ProgressBar', $filteredInput)
+                    ? (float) $filteredInput['ProgressBar']
+                    : (float) $task->ProgressBar;
+                $isCheckForCalc = array_key_exists('IsCheck', $filteredInput)
+                    ? (bool) $filteredInput['IsCheck']
+                    : (bool) $task->IsCheck;
+
                 $updateData['ProgressCode'] = $this->calculateProgressCode(
-                    $filteredInput['ProgressBar'],
+                    $progressBarForCalc,
+                    $isCheckForCalc,
                     $task->EndDate,
                     $newEndDate
                 );
@@ -2707,8 +2711,13 @@ class ProjectController extends Controller
 
             // ProgressCode auto-calc
             if (array_key_exists('ProgressBar', $input)) {
+                $progressBarForCalc = (float) $input['ProgressBar'];
+                $isCheckForCalc = array_key_exists('IsCheck', $input)
+                    ? (bool) $input['IsCheck']
+                    : (bool) $task->IsCheck;
                 $updateData['ProgressCode'] = $this->calculateProgressCode(
-                    $input['ProgressBar'],
+                    $progressBarForCalc,
+                    $isCheckForCalc,
                     $task->EndDate,
                     $task->EndDate
                 );
@@ -2735,6 +2744,7 @@ class ProjectController extends Controller
 
             $newProgressCode = $this->calculateProgressCode(
                 $newProgressBar,
+                (bool) $request->input('IsCheck', $task->IsCheck),
                 $originalEndDate,
                 $newEndDate
             );

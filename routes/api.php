@@ -159,6 +159,8 @@ Route::middleware(['jwt.auth'])->group(function () {
 
         // List documents by organization
         Route::post('/list', [DocumentManagementController::class, 'listByOrganization']);
+        // List documents with RACI activities (DocumentType can be any)
+        Route::post('/list-raci', [DocumentManagementController::class, 'listRaciByOrganization']);
         // Route::middleware('permission:Document.view')->group(function () {
         // Get document details with all versions
         Route::get('/{documentId}', [DocumentManagementController::class, 'getDocument']);
@@ -173,6 +175,8 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::put('/{documentId}/info', [DocumentManagementController::class, 'updateDocumentInfo']);
         Route::patch('/{documentId}/inactive', [DocumentManagementController::class, 'inactiveDocument']);
         Route::post('/{documentId}/add-raci-document', [DocumentManagementController::class, 'addRaciDocument']);
+        Route::put('/{documentId}/update-raci-activities', [DocumentManagementController::class, 'updateRaciActivities']);
+        Route::post('/audit-log/detail', [DocumentManagementController::class, 'getAuditLogDetailsByReference']);
         // });
         // Get document version URL (view/download)
         Route::post('/version-url', [DocumentManagementController::class, 'getVersionUrl']);

@@ -550,15 +550,16 @@ trait ProjectControllerHelpers
      * Calculate ProgressCode based on ProgressBar and dates
      * 
      * @param float $progressBar
+     * @param bool $isCheck
      * @param string $originalEndDate - Original end date from DB
      * @param string $newEndDate - New end date from request
      * @return int
      */
-    private function calculateProgressCode($progressBar, $originalEndDate, $newEndDate)
+    private function calculateProgressCode($progressBar, $isCheck, $originalEndDate, $newEndDate)
     {
-        // COMPLETED: progress = 100%
+        // 100% progress can be COMPLETED or CHECKED
         if ($progressBar >= 100) {
-            return 2;
+            return $isCheck ? 3 : 2;
         }
 
         // INITIAL: progress = 0%
@@ -568,7 +569,7 @@ trait ProjectControllerHelpers
 
         // Check if end date has been extended (DELAYED)
         if ($newEndDate > $originalEndDate) {
-            return 3; // DELAYED
+            return 4; // DELAYED
         }
 
         // ON-PROGRESS: 0% < progress < 100%, no date extension

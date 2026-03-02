@@ -56,11 +56,16 @@ class ProjectTask extends Model
      */
     public function getProgressStatusAttribute()
     {
+        if ((float) $this->ProgressBar >= 100) {
+            return (bool) $this->IsCheck ? 'CHECKED' : 'COMPLETED';
+        }
+
         $statuses = [
             0 => 'INITIAL',
             1 => 'ON-PROGRESS',
             2 => 'COMPLETED',
-            3 => 'DELAYED',
+            3 => 'CHECKED',
+            4 => 'DELAYED',
         ];
 
         return $statuses[$this->ProgressCode] ?? 'Unknown';
