@@ -546,6 +546,7 @@ class PositionController extends Controller
 
         // Check if position has children
         $hasChildren = Position::where('ParentPositionID', $id)
+            ->where('PositionID', '!=', $id)
             ->where('IsDelete', false)
             ->exists();
 
@@ -553,6 +554,21 @@ class PositionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Cannot delete position with active children'
+            ], 400);
+        }
+
+        $usedByActiveEmployee = EmployeePosition::where('PositionID', $id)
+            ->where('IsActive', true)
+            ->where('IsDelete', false)
+            ->whereHas('employee', function ($query) {
+                $query->where('IsDelete', false)->whereNull('ResignDate');
+            })
+            ->exists();
+
+        if ($usedByActiveEmployee) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete position because it is still used by active employee data'
             ], 400);
         }
 
@@ -652,6 +668,9 @@ class PositionController extends Controller
                 $usedByEmployee = EmployeePosition::where('PositionID', $id)
                     ->where('IsActive', true)
                     ->where('IsDelete', false)
+                    ->whereHas('employee', function ($query) {
+                        $query->where('IsDelete', false)->whereNull('ResignDate');
+                    })
                     ->exists();
 
                 if ($hasActiveChildren || $usedByEmployee) {

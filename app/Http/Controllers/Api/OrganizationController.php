@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\AuditLog;
+use App\Models\Employee;
+use App\Models\EmployeePosition;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
@@ -544,6 +546,7 @@ class OrganizationController extends Controller
 
         // Check if organization has children
         $hasChildren = Organization::where('ParentOrganizationID', $id)
+            ->where('OrganizationID', '!=', $id)
             ->where('IsDelete', false)
             ->exists();
 
@@ -551,6 +554,32 @@ class OrganizationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Cannot delete organization with active children'
+            ], 400);
+        }
+
+        $hasActiveEmployee = EmployeePosition::where('OrganizationID', $id)
+            ->where('IsActive', true)
+            ->where('IsDelete', false)
+            ->whereHas('employee', function ($query) {
+                $query->where('IsDelete', false)->whereNull('ResignDate');
+            })
+            ->exists();
+
+        if ($hasActiveEmployee) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete organization because it is still used by active employee data'
+            ], 400);
+        }
+
+        $employeeCountByOrganization = Employee::where('OrganizationID', $id)
+            ->where('IsActive', true)
+            ->count();
+
+        if ($employeeCountByOrganization > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete organization because active employee data still exists in this organization'
             ], 400);
         }
 
@@ -629,6 +658,34 @@ class OrganizationController extends Controller
             $authUserId = $request->auth_user_id;
 
             $newStatus = !$organization->IsActive;
+
+            if (!$newStatus) {
+                $hasActiveEmployee = EmployeePosition::where('OrganizationID', $id)
+                    ->where('IsActive', true)
+                    ->where('IsDelete', false)
+                    ->whereHas('employee', function ($query) {
+                        $query->where('IsDelete', false)->whereNull('ResignDate');
+                    })
+                    ->exists();
+
+                if ($hasActiveEmployee) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Organization cannot be deactivated because it is still used by active employee data'
+                    ], 400);
+                }
+
+                $employeeCountByOrganization = Employee::where('OrganizationID', $id)
+                    ->where('IsActive', true)
+                    ->count();
+
+                if ($employeeCountByOrganization > 0) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Organization cannot be deactivated because active employee data still exists in this organization'
+                    ], 400);
+                }
+            }
 
             $organization->update([
                 'AtTimeStamp' => $timestamp,

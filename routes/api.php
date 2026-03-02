@@ -78,6 +78,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Route::middleware('permission:Organization.edit')->group(function () {
         Route::put('/{id}', [OrganizationController::class, 'update']);
         Route::patch('/{id}/toggle-active', [OrganizationController::class, 'toggleActive']);
+        Route::delete('/{id}', [OrganizationController::class, 'destroy']);
         // });
     });
 
@@ -100,6 +101,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Route::middleware('permission:Position.edit')->group(function () {
         Route::put('/{id}', [PositionController::class, 'update']);
         Route::patch('/{id}/toggle-active', [PositionController::class, 'toggleActive']);
+        Route::delete('/{id}', [PositionController::class, 'destroy']);
         // });
     });
 
