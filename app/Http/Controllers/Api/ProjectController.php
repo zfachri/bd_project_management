@@ -194,7 +194,7 @@ class ProjectController extends Controller
             // 2. Create Project Status
             ProjectStatus::create([
                 'ProjectID' => $projectId,
-                'ProjectStatusCode' => $request->input('status.ProjectStatusCode'),
+                'ProjectStatusCode' => 10,
                 'ProjectStatusReason' => $request->input('status.ProjectStatusReason'),
                 'TotalMember' => 0,
                 'TotalTaskPriority1' => 0,
@@ -854,247 +854,215 @@ class ProjectController extends Controller
         }
     }
 
-        /**
-         * List Projects (Role Aware)
-         *
-         * GET /projects
-         */
-        public function index(Request $request)
-        {
-            try {
-                // =========================
-                // VALIDATOR
-                // =========================
-                $validator = Validator::make($request->all(), [
-                    'page'      => 'nullable|integer|min:1',
-                    'per_page'  => 'nullable|integer|min:1|max:100',
-                    'Search'    => 'nullable|string|max:100',
-                    'StartDate' => 'nullable|date_format:Y-m-d',
-                    'EndDate'   => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
-                ], [
-                    'EndDate.after_or_equal' => 'EndDate must be greater than or equal to StartDate.'
-                ]);
-
-                if ($validator->fails()) {
-                    return response()->json([
-                        'success' => false,
-                        'errors'  => $validator->errors(),
-                    ], 422);
-                }
-
-                $authUser   = $request->auth_user;
-                $authUserId = $request->auth_user_id;
-
-                // Sesuaikan field admin sesuai User model
-                $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
-                $perPage    = $request->per_page ?? 10;
-                $page       = $request->page ?? 1;
-
-                // ----------------------------------------
-                // BASE QUERY
-                // ----------------------------------------
-                $query = Project::query()
-                    ->where('Project.IsDelete', false)
-                    ->with('status')
-                
-                    // COUNT TASK
-                    ->select('Project.*')
-                    ->selectSub(function ($q) {
-                        $q->from('ProjectTask')
-                          ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
-                          ->where('ProjectTask.IsDelete', false)
-                          ->selectRaw('COUNT(*)');
-                    }, 'total_task')
-                
-                    // SUM PROGRESS WITH RULE
-                    ->selectSub(function ($q) {
-                        $q->from('ProjectTask')
-                          ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
-                          ->where('ProjectTask.IsDelete', false)
-                          ->selectRaw("
-                            COALESCE(SUM(
-                                CASE 
-                                    WHEN ProgressBar = 100 AND IsCheck = 0 THEN 99
-                                    ELSE ProgressBar
-                                END
-                            ), 0)
-                          ");
-                    }, 'total_progress');
-
-
-                // ----------------------------------------
-                // FILTER FOR NON ADMIN
-                // ----------------------------------------
-                if (!$isAdmin) {
-                    $query->whereIn('ProjectID', function ($q) use ($authUserId) {
-                        $q->select('ProjectID')
-                            ->from('ProjectMember')
-                            ->where('UserID', $authUserId)
-                            ->where('IsActive', true);
-                    });
-                }
-
-                // =========================
-                // SEARCH FILTER
-                // =========================
-                if ($request->filled('Search')) {
-                    $query->where(function ($q) use ($request) {
-                        $q->where('Project.ProjectName', 'like', '%' . $request->Search . '%')
-                        ->orWhere('Project.ProjectDescription', 'like', '%' . $request->Search . '%');
-                    });
-                }
-
-                // =========================
-                // DATE FILTER (OVERLAP)
-                // =========================
-                // if ($request->filled('StartDate')) {
-                //     $query->whereDate('Project.EndDate', '>=', $request->StartDate);
-                // }
-
-                // if ($request->filled('EndDate')) {
-                //     $query->whereDate('Project.StartDate', '<=', $request->EndDate);
-                // }
-
-                if ($request->filled('StartDate') && $request->filled('EndDate')) {
-
-                    $query->where(function ($q) use ($request) {
-                        $q->whereDate('Project.StartDate', '<=', $request->StartDate)
-                          ->whereDate('Project.EndDate', '>=', $request->EndDate);
-                    });
-
-                }
-
-                // =========================
-                // PAGINATION
-                // =========================
-                $projects = $query
-                    ->orderBy('Project.AtTimeStamp', 'DESC')
-                    ->paginate($perPage, ['*'], 'page', $page);
-
-                // =========================
-                // TRANSFORM RESPONSE
-                // =========================
-                $data = $projects->getCollection()->transform(function ($project) use ($authUserId, $isAdmin) {
-
-                    $member = null;
-
-                    if (!$isAdmin) {
-                        $member = ProjectMember::where('ProjectID', $project->ProjectID)
-                            ->where('UserID', $authUserId)
-                            ->where('IsActive', true)
-                            ->first();
-                    }
-
-                    // =========================
-                    // CALCULATE FINAL PROGRESS
-                    // =========================
-                    $projectProgress = 0;
-
-                    if ($project->total_task > 0) {
-                        $projectProgress = round(
-                            $project->total_progress / $project->total_task,
-                            2
-                        );
-                    }
-
-                    return 
-                    [
-                        'ProjectID'          => $project->ProjectID,
-                        'ProjectName'        => $project->ProjectName,
-                        'ProjectDescription'=> $project->ProjectDescription,
-                        'StartDate'          => $project->StartDate,
-                        'EndDate'            => $project->EndDate,
-                        'PriorityCode'       => $project->PriorityCode,
-                        'Progress'            => $projectProgress,
-
-                        'Status' => [
-                            'ProjectStatusCode'  => $project->status->ProjectStatusCode ?? null,
-                            'ProjectStatusName'  => ProjectStatus::nameFromCode($project->status->ProjectStatusCode ?? null),
-                            'TotalMember'        => $project->status->TotalMember ?? 0,
-                            'TotalTask'          => $project->status->TotalTask ?? 0,
-                            'TotalExpense'       => $project->status->TotalExpense ?? 0,
-                            'AccumulatedExpense' => $project->status->AccumulatedExpense ?? 0,
-                        ],
-
-                        // Role info for FE
-                        'role' => $isAdmin
-                            ? 'ADMIN'
-                            : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
-
-                        'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
-                    ];
-                });
-
-                return response()->json([
-                    'success' => true,
-                    'role'    => $isAdmin ? 'ADMIN' : 'USER',
-                    'data'    => $data,
-                    'meta'    => [
-                        'current_page' => $projects->currentPage(),
-                        'per_page'     => $projects->perPage(),
-                        'total'        => $projects->total(),
-                        'last_page'    => $projects->lastPage(),
-                    ]
-                ], 200);
-
-                // // ----------------------------------------
-                // // FETCH PROJECTS
-                // // ----------------------------------------
-                // $projects = $query  
-                //     ->orderBy('AtTimeStamp', 'desc')
-                //     ->get();
-
-                // // ----------------------------------------
-                // // MAP RESPONSE
-                // // ----------------------------------------
-                // $data = $projects->map(function ($project) use ($authUserId, $isAdmin) {
-
-                //     $member = null;
-
-                //     if (!$isAdmin) {
-                //         $member = ProjectMember::where('ProjectID', $project->ProjectID)
-                //             ->where('UserID', $authUserId)
-                //             ->where('IsActive', true)
-                //             ->first();
-                //     }
-
-                //     return [
-                //         'ProjectID' => $project->ProjectID,
-                //         'ProjectDescription' => $project->ProjectDescription,
-                //         'ProjectName' => $project->ProjectName,
-                //         'StartDate' => $project->StartDate,
-                //         'EndDate' => $project->EndDate,
-                //         'PriorityCode' => $project->PriorityCode,
-
-                //         'Status' => [
-                //             'ProjectStatusCode' => $project->status->ProjectStatusCode ?? null,
-                //             'TotalMember' => $project->status->TotalMember ?? 0,
-                //             'TotalTask' => $project->status->TotalTask ?? 0,
-                //             'TotalExpense' => $project->status->TotalExpense ?? 0,
-                //             'AccumulatedExpense' => $project->status->AccumulatedExpense ?? 0,
-                //         ],
-
-                //         // Role info for FE
-                //         'role' => $isAdmin
-                //             ? 'ADMIN'
-                //             : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
-
-                //         'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
-                //     ];
-                // });
-
-                // return response()->json([
-                //     'success' => true,
-                //     'data' => $data,
-                // ], 200);
-            } catch (\Exception $e) {
+    /**
+     * List Projects (Role Aware)
+     *
+     * GET /projects
+     */
+    public function index(Request $request)
+    {
+        try {
+            // =========================
+            // VALIDATOR
+            // =========================
+            $validator = Validator::make($request->all(), [
+                'page'      => 'nullable|integer|min:1',
+                'per_page'  => 'nullable|integer|min:1|max:100',
+                'Search'    => 'nullable|string|max:100',
+                'StartDate' => 'nullable|date_format:Y-m-d',
+                'EndDate'   => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
+            ], [
+                'EndDate.after_or_equal' => 'EndDate must be greater than or equal to StartDate.'
+            ]);
+            if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Failed to fetch project list',
-                    'error' => $e->getMessage(),
-                ], 500);
+                    'errors'  => $validator->errors(),
+                ], 422);
             }
+            $authUser   = $request->auth_user;
+            $authUserId = $request->auth_user_id;
+            // Sesuaikan field admin sesuai User model
+            $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
+            $perPage    = $request->per_page ?? 10;
+            $page       = $request->page ?? 1;
+            // ----------------------------------------
+            // BASE QUERY
+            // ----------------------------------------
+            $query = Project::query()
+                ->where('Project.IsDelete', false)
+                ->with('status')
+            
+                // COUNT TASK
+                ->select('Project.*')
+                ->selectSub(function ($q) {
+                    $q->from('ProjectTask')
+                      ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
+                      ->where('ProjectTask.IsDelete', false)
+                      ->selectRaw('COUNT(*)');
+                }, 'total_task')
+            
+                // SUM PROGRESS WITH RULE
+                ->selectSub(function ($q) {
+                    $q->from('ProjectTask')
+                      ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
+                      ->where('ProjectTask.IsDelete', false)
+                      ->selectRaw("
+                        COALESCE(SUM(
+                            CASE 
+                                WHEN ProgressBar = 100 AND IsCheck = 0 THEN 99
+                                ELSE ProgressBar
+                            END
+                        ), 0)
+                      ");
+                }, 'total_progress');
+            // ----------------------------------------
+            // FILTER FOR NON ADMIN
+            // ----------------------------------------
+            if (!$isAdmin) {
+                $query->whereIn('ProjectID', function ($q) use ($authUserId) {
+                    $q->select('ProjectID')
+                        ->from('ProjectMember')
+                        ->where('UserID', $authUserId)
+                        ->where('IsActive', true);
+                });
+            }
+            // =========================
+            // SEARCH FILTER
+            // =========================
+            if ($request->filled('Search')) {
+                $query->where(function ($q) use ($request) {
+                    $q->where('Project.ProjectName', 'like', '%' . $request->Search . '%')
+                    ->orWhere('Project.ProjectDescription', 'like', '%' . $request->Search . '%');
+                });
+            }
+            // =========================
+            // DATE FILTER (OVERLAP)
+            // =========================
+            // if ($request->filled('StartDate')) {
+            //     $query->whereDate('Project.EndDate', '>=', $request->StartDate);
+            // }
+            // if ($request->filled('EndDate')) {
+            //     $query->whereDate('Project.StartDate', '<=', $request->EndDate);
+            // }
+            if ($request->filled('StartDate') && $request->filled('EndDate')) {
+                $query->where(function ($q) use ($request) {
+                    $q->whereDate('Project.StartDate', '<=', $request->StartDate)
+                      ->whereDate('Project.EndDate', '>=', $request->EndDate);
+                });
+            }
+            // =========================
+            // PAGINATION
+            // =========================
+            $projects = $query
+                ->orderBy('Project.AtTimeStamp', 'DESC')
+                ->paginate($perPage, ['*'], 'page', $page);
+            // =========================
+            // TRANSFORM RESPONSE
+            // =========================
+            $data = $projects->getCollection()->transform(function ($project) use ($authUserId, $isAdmin) {
+                $member = null;
+                if (!$isAdmin) {
+                    $member = ProjectMember::where('ProjectID', $project->ProjectID)
+                        ->where('UserID', $authUserId)
+                        ->where('IsActive', true)
+                        ->first();
+                }
+                // =========================
+                // CALCULATE FINAL PROGRESS
+                // =========================
+                $projectProgress = 0;
+                if ($project->total_task > 0) {
+                    $projectProgress = round(
+                        $project->total_progress / $project->total_task,
+                        2
+                    );
+                }
+                return 
+                [
+                    'ProjectID'          => $project->ProjectID,
+                    'ProjectName'        => $project->ProjectName,
+                    'ProjectDescription'=> $project->ProjectDescription,
+                    'StartDate'          => $project->StartDate,
+                    'EndDate'            => $project->EndDate,
+                    'PriorityCode'       => $project->PriorityCode,
+                    'Progress'            => $projectProgress,
+                    'Status' => [
+                        'ProjectStatusCode'  => $project->status->ProjectStatusCode ?? null,
+                        'ProjectStatusName'  => ProjectStatus::nameFromCode($project->status->ProjectStatusCode ?? null),
+                        'TotalMember'        => $project->status->TotalMember ?? 0,
+                        'TotalTask'          => $project->status->TotalTask ?? 0,
+                        'TotalExpense'       => $project->status->TotalExpense ?? 0,
+                        'AccumulatedExpense' => $project->status->AccumulatedExpense ?? 0,
+                    ],
+                    // Role info for FE
+                    'role' => $isAdmin
+                        ? 'ADMIN'
+                        : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
+                    'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
+                ];
+            });
+            return response()->json([
+                'success' => true,
+                'role'    => $isAdmin ? 'ADMIN' : 'USER',
+                'data'    => $data,
+                'meta'    => [
+                    'current_page' => $projects->currentPage(),
+                    'per_page'     => $projects->perPage(),
+                    'total'        => $projects->total(),
+                    'last_page'    => $projects->lastPage(),
+                ]
+            ], 200);
+            // // ----------------------------------------
+            // // FETCH PROJECTS
+            // // ----------------------------------------
+            // $projects = $query  
+            //     ->orderBy('AtTimeStamp', 'desc')
+            //     ->get();
+            // // ----------------------------------------
+            // // MAP RESPONSE
+            // // ----------------------------------------
+            // $data = $projects->map(function ($project) use ($authUserId, $isAdmin) {
+            //     $member = null;
+            //     if (!$isAdmin) {
+            //         $member = ProjectMember::where('ProjectID', $project->ProjectID)
+            //             ->where('UserID', $authUserId)
+            //             ->where('IsActive', true)
+            //             ->first();
+            //     }
+            //     return [
+            //         'ProjectID' => $project->ProjectID,
+            //         'ProjectDescription' => $project->ProjectDescription,
+            //         'ProjectName' => $project->ProjectName,
+            //         'StartDate' => $project->StartDate,
+            //         'EndDate' => $project->EndDate,
+            //         'PriorityCode' => $project->PriorityCode,
+            //         'Status' => [
+            //             'ProjectStatusCode' => $project->status->ProjectStatusCode ?? null,
+            //             'TotalMember' => $project->status->TotalMember ?? 0,
+            //             'TotalTask' => $project->status->TotalTask ?? 0,
+            //             'TotalExpense' => $project->status->TotalExpense ?? 0,
+            //             'AccumulatedExpense' => $project->status->AccumulatedExpense ?? 0,
+            //         ],
+            //         // Role info for FE
+            //         'role' => $isAdmin
+            //             ? 'ADMIN'
+            //             : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
+            //         'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
+            //     ];
+            // });
+            // return response()->json([
+            //     'success' => true,
+            //     'data' => $data,
+            // ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch project list',
+                'error' => $e->getMessage(),
+            ], 500);
         }
+    }
 
     /**
      * Get Project Detail
@@ -1375,7 +1343,14 @@ class ProjectController extends Controller
             if ($currentStatusCode === '00') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Project with status 00 (VOID) cannot be updated',
+                    'message' => 'Project with status (VOID) cannot be updated',
+                ], 409);
+            }
+
+            if ($currentStatusCode === '99') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Project with status (COMPLETED) cannot be updated',
                 ], 409);
             }
 
