@@ -4711,12 +4711,12 @@ class ProjectController extends Controller
             if (in_array($type, ['task', 'all'], true)) {
                 $taskFiles = ProjectTaskFile::query()
                     ->select([
-                        'ProjectTaskFileID as FileID',
-                        'ProjectTaskID as ReferenceID',
-                        'OriginalFileName as original_filename',
-                        'DocumentUrl as document_url',
-                        'DocumentOriginalUrl as document_original_url',
-                        'AtTimeStamp as at_timestamp',
+                        'ProjectTaskFile.ProjectTaskFileID as FileID',
+                        'ProjectTaskFile.ProjectTaskID as ReferenceID',
+                        'ProjectTaskFile.OriginalFileName as original_filename',
+                        'ProjectTaskFile.DocumentUrl as document_url',
+                        'ProjectTaskFile.DocumentOriginalUrl as document_original_url',
+                        'ProjectTaskFile.AtTimeStamp as at_timestamp',
                         DB::raw("'task' as source_type"),
                     ])
                     ->join(
@@ -4759,12 +4759,12 @@ class ProjectController extends Controller
             if (in_array($type, ['expense', 'all'], true)) {
                 $expenseFiles = ProjectExpenseFile::query()
                     ->select([
-                        'ProjectExpenseFileID as FileID',
-                        'ProjectExpenseID as ReferenceID',
-                        'OriginalFileName as original_filename',
-                        'DocumentUrl as document_url',
-                        'DocumentOriginalUrl as document_original_url',
-                        'AtTimeStamp as at_timestamp',
+                        'ProjectExpenseFile.ProjectExpenseFileID as FileID',
+                        'ProjectExpenseFile.ProjectExpenseID as ReferenceID',
+                        'ProjectExpenseFile.OriginalFileName as original_filename',
+                        'ProjectExpenseFile.DocumentUrl as document_url',
+                        'ProjectExpenseFile.DocumentOriginalUrl as document_original_url',
+                        'ProjectExpenseFile.AtTimeStamp as at_timestamp',
                         DB::raw("'expense' as source_type"),
                     ])
                     ->join(
