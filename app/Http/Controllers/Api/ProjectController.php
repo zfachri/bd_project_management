@@ -4690,6 +4690,14 @@ class ProjectController extends Controller
     
             $type = strtolower((string) $request->query('type', 'all')); // task | expense | project | all
             $today = Carbon::today()->format('Y-m-d');
+            $globalPerPage = max(1, min(100, (int) $request->query('per_page', 10)));
+            $globalPage = max(1, (int) $request->query('page', 1));
+            $taskPerPage = max(1, min(100, (int) $request->query('task_per_page', $globalPerPage)));
+            $expensePerPage = max(1, min(100, (int) $request->query('expense_per_page', $globalPerPage)));
+            $projectPerPage = max(1, min(100, (int) $request->query('project_per_page', $globalPerPage)));
+            $taskPage = max(1, (int) $request->query('task_page', $globalPage));
+            $expensePage = max(1, (int) $request->query('expense_page', $globalPage));
+            $projectPage = max(1, (int) $request->query('project_page', $globalPage));
             $projectHeader = Project::query()
                 ->select(['ProjectID', 'StartDate', 'EndDate'])
                 ->where('ProjectID', $projectId)
@@ -4706,10 +4714,18 @@ class ProjectController extends Controller
             // =========================
             // TASK FILES QUERY
             // =========================
-            $taskFiles = collect();
+            $taskFiles = [
+                'items' => [],
+                'pagination' => [
+                    'current_page' => $taskPage,
+                    'per_page' => $taskPerPage,
+                    'total' => 0,
+                    'last_page' => 0,
+                ],
+            ];
 
             if (in_array($type, ['task', 'all'], true)) {
-                $taskFiles = ProjectTaskFile::query()
+                $taskFilesQuery = ProjectTaskFile::query()
                     ->select([
                         'ProjectTaskFile.ProjectTaskFileID as FileID',
                         'ProjectTaskFile.ProjectTaskID as ReferenceID',
@@ -4731,7 +4747,7 @@ class ProjectController extends Controller
     
                 // IsCheck filter (TASK ONLY)
                 if ($request->filled('is_check')) {
-                    $taskFiles->where(
+                    $taskFilesQuery->where(
                         'ProjectTask.IsCheck',
                         filter_var($request->is_check, FILTER_VALIDATE_BOOLEAN)
                     );
@@ -4739,7 +4755,7 @@ class ProjectController extends Controller
     
                 // DATE FILTER (overlap + default today)
                 $this->applyDateFilter(
-                    $taskFiles,
+                    $taskFilesQuery,
                     'ProjectTask.StartDate',
                     'ProjectTask.EndDate',
                     $request,
@@ -4747,17 +4763,37 @@ class ProjectController extends Controller
                     optional($projectHeader->StartDate)->format('Y-m-d'),
                     optional($projectHeader->EndDate)->format('Y-m-d')
                 );
-    
-                $taskFiles = $taskFiles->get();
+
+                $taskFilesPaginator = $taskFilesQuery
+                    ->orderBy('ProjectTaskFile.AtTimeStamp', 'DESC')
+                    ->paginate($taskPerPage, ['*'], 'task_page', $taskPage);
+
+                $taskFiles = [
+                    'items' => $taskFilesPaginator->items(),
+                    'pagination' => [
+                        'current_page' => $taskFilesPaginator->currentPage(),
+                        'per_page' => $taskFilesPaginator->perPage(),
+                        'total' => $taskFilesPaginator->total(),
+                        'last_page' => $taskFilesPaginator->lastPage(),
+                    ],
+                ];
             }
     
             // =========================
             // EXPENSE FILES QUERY
             // =========================
-            $expenseFiles = collect();
+            $expenseFiles = [
+                'items' => [],
+                'pagination' => [
+                    'current_page' => $expensePage,
+                    'per_page' => $expensePerPage,
+                    'total' => 0,
+                    'last_page' => 0,
+                ],
+            ];
 
             if (in_array($type, ['expense', 'all'], true)) {
-                $expenseFiles = ProjectExpenseFile::query()
+                $expenseFilesQuery = ProjectExpenseFile::query()
                     ->select([
                         'ProjectExpenseFile.ProjectExpenseFileID as FileID',
                         'ProjectExpenseFile.ProjectExpenseID as ReferenceID',
@@ -4778,7 +4814,7 @@ class ProjectController extends Controller
                     ->where('ProjectExpenseFile.IsDelete', false);
     
                 $this->applyDateFilter(
-                    $expenseFiles,
+                    $expenseFilesQuery,
                     'ProjectExpense.ExpenseDate',
                     'ProjectExpense.ExpenseDate',
                     $request,
@@ -4787,13 +4823,33 @@ class ProjectController extends Controller
                     optional($projectHeader->EndDate)->format('Y-m-d')
                 );
 
-                $expenseFiles = $expenseFiles->get();
+                $expenseFilesPaginator = $expenseFilesQuery
+                    ->orderBy('ProjectExpenseFile.AtTimeStamp', 'DESC')
+                    ->paginate($expensePerPage, ['*'], 'expense_page', $expensePage);
+
+                $expenseFiles = [
+                    'items' => $expenseFilesPaginator->items(),
+                    'pagination' => [
+                        'current_page' => $expenseFilesPaginator->currentPage(),
+                        'per_page' => $expenseFilesPaginator->perPage(),
+                        'total' => $expenseFilesPaginator->total(),
+                        'last_page' => $expenseFilesPaginator->lastPage(),
+                    ],
+                ];
             }
 
             // =========================
             // PROJECT FILES QUERY
             // =========================
-            $projectFiles = collect();
+            $projectFiles = [
+                'items' => [],
+                'pagination' => [
+                    'current_page' => $projectPage,
+                    'per_page' => $projectPerPage,
+                    'total' => 0,
+                    'last_page' => 0,
+                ],
+            ];
 
             if (in_array($type, ['project', 'all'], true)) {
                 $projectFilesQuery = Project::query()
@@ -4820,19 +4876,24 @@ class ProjectController extends Controller
                     optional($projectHeader->EndDate)->format('Y-m-d')
                 );
 
-                $projectFiles = $projectFilesQuery->get();
+                $projectFilesPaginator = $projectFilesQuery
+                    ->orderBy('AtTimeStamp', 'DESC')
+                    ->paginate($projectPerPage, ['*'], 'project_page', $projectPage);
+
+                $projectFiles = [
+                    'items' => $projectFilesPaginator->items(),
+                    'pagination' => [
+                        'current_page' => $projectFilesPaginator->currentPage(),
+                        'per_page' => $projectFilesPaginator->perPage(),
+                        'total' => $projectFilesPaginator->total(),
+                        'last_page' => $projectFilesPaginator->lastPage(),
+                    ],
+                ];
             }
 
-            // =========================
-            // SORT PER CATEGORY
-            // =========================
-            $taskFiles = $taskFiles->sortByDesc('at_timestamp')->values();
-            $expenseFiles = $expenseFiles->sortByDesc('at_timestamp')->values();
-            $projectFiles = $projectFiles->sortByDesc('at_timestamp')->values();
-
-            $totalFiles = $taskFiles->count()
-                + $expenseFiles->count()
-                + $projectFiles->count();
+            $totalFiles = $taskFiles['pagination']['total']
+                + $expenseFiles['pagination']['total']
+                + $projectFiles['pagination']['total'];
 
             return response()->json([
                 'success' => true,
