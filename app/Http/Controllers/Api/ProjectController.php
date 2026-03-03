@@ -4667,6 +4667,30 @@ class ProjectController extends Controller
     public function projectFiles(Request $request, $projectId)
     {
         try {
+            $validator = Validator::make($request->all(), [
+                'type' => 'nullable|in:task,expense,project,all',
+                'is_check' => 'nullable|boolean',
+                'SearchDate' => 'nullable|date_format:Y-m-d',
+                'StartDate' => 'nullable|date_format:Y-m-d',
+                'EndDate' => 'nullable|date_format:Y-m-d',
+                'page' => 'nullable|integer|min:1',
+                'per_page' => 'nullable|integer|min:1|max:100',
+                'task_page' => 'nullable|integer|min:1',
+                'task_per_page' => 'nullable|integer|min:1|max:100',
+                'expense_page' => 'nullable|integer|min:1',
+                'expense_per_page' => 'nullable|integer|min:1|max:100',
+                'project_page' => 'nullable|integer|min:1',
+                'project_per_page' => 'nullable|integer|min:1|max:100',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
             $authUser   = $request->auth_user;
             $authUserId = $request->auth_user_id;
             $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
