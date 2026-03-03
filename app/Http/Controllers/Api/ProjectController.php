@@ -192,7 +192,7 @@ class ProjectController extends Controller
             }
 
             // 2. Create Project Status
-            ProjectStatus::create([
+            $projectStatus = ProjectStatus::create([
                 'ProjectID' => $projectId,
                 'ProjectStatusCode' => 10,
                 'ProjectStatusReason' => $request->input('status.ProjectStatusReason'),
@@ -212,6 +212,21 @@ class ProjectController extends Controller
                 'LastTaskUpdateByUserID' => null,
                 'LastExpenseUpdateAtTimeStamp' => null,
                 'LastExpenseUpdateByUserID' => null,
+            ]);
+
+            AuditLog::create([
+                'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+                'AtTimeStamp' => Carbon::now()->timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'ReferenceTable' => 'ProjectStatus',
+                'ReferenceRecordID' => $projectId,
+                'Data' => json_encode([
+                    'ProjectID' => $projectStatus->ProjectID,
+                    'ProjectStatusCode' => $projectStatus->ProjectStatusCode,
+                    'ProjectStatusReason' => $projectStatus->ProjectStatusReason,
+                ]),
+                'Note' => 'Project status created via wizard'
             ]);
 
             // 3. Create Project Members
@@ -236,6 +251,23 @@ class ProjectController extends Controller
                 ]);
 
                 $memberMap[$memberData['UserID']] = $memberId;
+
+                AuditLog::create([
+                    'AuditLogID' => $memberTimestamp . random_numbersu(5),
+                    'AtTimeStamp' => $memberTimestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'I',
+                    'ReferenceTable' => 'ProjectMember',
+                    'ReferenceRecordID' => $memberId,
+                    'Data' => json_encode([
+                        'ProjectMemberID' => $memberId,
+                        'ProjectID' => $projectId,
+                        'UserID' => $memberData['UserID'],
+                        'IsOwner' => $memberData['IsOwner'],
+                        'Title' => $memberData['Title'] ?? null,
+                    ]),
+                    'Note' => 'Project member created via wizard'
+                ]);
 
                 $createdMembers[] = [
                     'ProjectMemberID' => $memberId,
@@ -268,6 +300,27 @@ class ProjectController extends Controller
                         'TargetValue' => $miniGoalData['TargetValue'],
                         'ActualValue' => $miniGoalData['ActualValue'] ?? 0,
                         'IsDelete' => false,
+                    ]);
+
+                    AuditLog::create([
+                        'AuditLogID' => $miniGoalTimestamp . random_numbersu(5),
+                        'AtTimeStamp' => $miniGoalTimestamp,
+                        'ByUserID' => $authUserId,
+                        'OperationCode' => 'I',
+                        'ReferenceTable' => 'MiniGoal',
+                        'ReferenceRecordID' => $miniGoalId,
+                        'Data' => json_encode([
+                            'MiniGoalID' => $miniGoalId,
+                            'ProjectID' => $projectId,
+                            'SequenceNo' => $miniGoalData['SequenceNo'] ?? null,
+                            'MiniGoalDescription' => $miniGoalData['MiniGoalDescription'],
+                            'MiniGoalCategoryCode' => $miniGoalData['MiniGoalCategoryCode'],
+                            'MiniGoalFirstPrefixCode' => $miniGoalData['MiniGoalFirstPrefixCode'] ?? "",
+                            'MiniGoalLastPrefixCode' => $miniGoalData['MiniGoalLastPrefixCode'] ?? "",
+                            'TargetValue' => $miniGoalData['TargetValue'],
+                            'ActualValue' => $miniGoalData['ActualValue'] ?? 0,
+                        ]),
+                        'Note' => 'Mini goal created via wizard'
                     ]);
 
                     $createdMiniGoals[] = [
@@ -333,6 +386,29 @@ class ProjectController extends Controller
                         'IsCheck' => false,
                     ]);
 
+                    AuditLog::create([
+                        'AuditLogID' => $taskTimestamp . random_numbersu(5),
+                        'AtTimeStamp' => $taskTimestamp,
+                        'ByUserID' => $authUserId,
+                        'OperationCode' => 'I',
+                        'ReferenceTable' => 'ProjectTask',
+                        'ReferenceRecordID' => $taskId,
+                        'Data' => json_encode([
+                            'ProjectTaskID' => $taskId,
+                            'ProjectID' => $projectId,
+                            'ParentProjectTaskID' => $taskData['ParentProjectTaskID'] ?? null,
+                            'SequenceNo' => $taskData['SequenceNo'] ?? null,
+                            'PriorityCode' => $taskData['PriorityCode'],
+                            'TaskDescription' => $taskData['TaskDescription'],
+                            'StartDate' => $taskData['StartDate'],
+                            'EndDate' => $taskData['EndDate'],
+                            'ProgressCode' => $progressCode,
+                            'ProgressBar' => $progressBar,
+                            'Note' => $taskData['Note'] ?? null,
+                        ]),
+                        'Note' => 'Project task created via wizard'
+                    ]);
+
                     $taskFileUrls = [];
 
                     // 5a. Generate Presigned URLs for Task Files (if any)
@@ -347,6 +423,25 @@ class ProjectController extends Controller
                             );
 
                             $taskFileUrls[] = $fileResult;
+
+                            AuditLog::create([
+                                'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+                                'AtTimeStamp' => Carbon::now()->timestamp,
+                                'ByUserID' => $authUserId,
+                                'OperationCode' => 'I',
+                                'ReferenceTable' => 'ProjectTaskFile',
+                                'ReferenceRecordID' => $fileResult['ProjectTaskFileID'],
+                                'Data' => json_encode([
+                                    'ProjectTaskFileID' => $fileResult['ProjectTaskFileID'],
+                                    'ProjectTaskID' => $taskId,
+                                    'ProjectID' => $projectId,
+                                    'OriginalFileName' => $fileResult['OriginalFileName'] ?? null,
+                                    'ConvertedFileName' => $fileResult['ConvertedFileName'] ?? null,
+                                    'DocumentPath' => $fileResult['file_path'] ?? ($fileResult['pdf_file_path'] ?? null),
+                                    'DocumentOriginalPath' => $fileResult['original_file_path'] ?? null,
+                                ]),
+                                'Note' => 'Project task file created via wizard'
+                            ]);
                         }
                     }
 
@@ -419,6 +514,24 @@ class ProjectController extends Controller
                         'IsCheck' => false,
                     ]);
 
+                    AuditLog::create([
+                        'AuditLogID' => $expenseTimestamp . random_numbersu(5),
+                        'AtTimeStamp' => $expenseTimestamp,
+                        'ByUserID' => $authUserId,
+                        'OperationCode' => 'I',
+                        'ReferenceTable' => 'ProjectExpense',
+                        'ReferenceRecordID' => $expenseId,
+                        'Data' => json_encode([
+                            'ProjectExpenseID' => $expenseId,
+                            'ProjectID' => $projectId,
+                            'ExpenseDate' => $expenseData['ExpenseDate'],
+                            'ExpenseNote' => $expenseData['ExpenseNote'],
+                            'CurrencyCode' => $expenseData['CurrencyCode'],
+                            'ExpenseAmount' => $expenseData['ExpenseAmount'],
+                        ]),
+                        'Note' => 'Project expense created via wizard'
+                    ]);
+
                     $expenseFileUrls = [];
 
                     // 6a. Generate Presigned URLs for Expense Files (if any)
@@ -433,6 +546,25 @@ class ProjectController extends Controller
                             );
 
                             $expenseFileUrls[] = $fileResult;
+
+                            AuditLog::create([
+                                'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+                                'AtTimeStamp' => Carbon::now()->timestamp,
+                                'ByUserID' => $authUserId,
+                                'OperationCode' => 'I',
+                                'ReferenceTable' => 'ProjectExpenseFile',
+                                'ReferenceRecordID' => $fileResult['ProjectExpenseFileID'],
+                                'Data' => json_encode([
+                                    'ProjectExpenseFileID' => $fileResult['ProjectExpenseFileID'],
+                                    'ProjectExpenseID' => $expenseId,
+                                    'ProjectID' => $projectId,
+                                    'OriginalFileName' => $fileResult['OriginalFileName'] ?? null,
+                                    'ConvertedFileName' => $fileResult['ConvertedFileName'] ?? null,
+                                    'DocumentPath' => $fileResult['file_path'] ?? ($fileResult['pdf_file_path'] ?? null),
+                                    'DocumentOriginalPath' => $fileResult['original_file_path'] ?? null,
+                                ]),
+                                'Note' => 'Project expense file created via wizard'
+                            ]);
                         }
                     }
 
@@ -4052,6 +4184,21 @@ class ProjectController extends Controller
             ->select([
                 'ProjectTask.*',
                 'Project.ProjectName',
+                DB::raw("
+                    CASE
+                        WHEN ProjectTask.OperationCode = 'I' AND ProjectTask.ByUserID IS NOT NULL
+                            THEN ProjectTask.ByUserID
+                        ELSE (
+                            SELECT al.ByUserID
+                            FROM AuditLog al
+                            WHERE al.ReferenceTable = 'ProjectTask'
+                                AND al.ReferenceRecordID = ProjectTask.ProjectTaskID
+                                AND al.OperationCode = 'I'
+                            ORDER BY al.AtTimeStamp ASC
+                            LIMIT 1
+                        )
+                    END AS CreatedBy
+                "),
             ])
             ->join('Project', 'Project.ProjectID', '=', 'ProjectTask.ProjectID')
             ->where('ProjectTask.IsDelete', false)
@@ -4068,12 +4215,40 @@ class ProjectController extends Controller
         // MODE FILTER
         // =========================
         $query->where(function ($q) use ($mode, $targetUserIds) {
+            $ownerFilter = function ($ownerQuery) use ($targetUserIds) {
+                $ownerQuery->where(function ($directCreatorQuery) use ($targetUserIds) {
+                    $directCreatorQuery->where('ProjectTask.OperationCode', 'I')
+                        ->whereNotNull('ProjectTask.ByUserID')
+                        ->whereIn('ProjectTask.ByUserID', $targetUserIds);
+                })->orWhere(function ($auditCreatorQuery) use ($targetUserIds) {
+                    $auditCreatorQuery->where('ProjectTask.OperationCode', 'U')
+                        ->whereExists(function ($sub) use ($targetUserIds) {
+                            $sub->selectRaw(1)
+                                ->from('AuditLog as al')
+                                ->where('al.ReferenceTable', 'ProjectTask')
+                                ->whereColumn('al.ReferenceRecordID', 'ProjectTask.ProjectTaskID')
+                                ->where('al.OperationCode', 'I')
+                                ->whereIn('al.ByUserID', $targetUserIds);
+                        });
+                });
+            };
 
             if ($mode === 'OWNER' || $mode === 'ALL') {
-                $q->whereIn('ProjectTask.CreatedBy', $targetUserIds);
+                $q->where($ownerFilter);
             }
 
-            if ($mode === 'NON_OWNER' || $mode === 'ALL') {
+            if ($mode === 'NON_OWNER') {
+                $q->whereExists(function ($sub) use ($targetUserIds) {
+                    $sub->selectRaw(1)
+                        ->from('ProjectAssignMember as pam')
+                        ->join('ProjectMember as pm', 'pm.ProjectMemberID', '=', 'pam.ProjectMemberID')
+                        ->whereColumn('pam.ProjectTaskID', 'ProjectTask.ProjectTaskID')
+                        ->whereIn('pm.UserID', $targetUserIds)
+                        ->where('pm.IsActive', true);
+                });
+            }
+
+            if ($mode === 'ALL') {
                 $q->orWhereExists(function ($sub) use ($targetUserIds) {
                     $sub->selectRaw(1)
                         ->from('ProjectAssignMember as pam')
