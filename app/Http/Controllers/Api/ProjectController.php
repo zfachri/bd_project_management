@@ -3999,6 +3999,10 @@ class ProjectController extends Controller
             'UserID.*'    => 'integer|exists:User,UserID',
             'StartDate'   => 'nullable|date_format:Y-m-d',
             'EndDate'     => 'nullable|date_format:Y-m-d',
+            'ProgressCode'   => 'nullable|array',
+            'ProgressCode.*' => 'integer|in:0,1,2,3,4',
+            'ProgressBar'    => 'nullable|array|size:2',
+            'ProgressBar.*'  => 'numeric|min:0|max:100',
             'IsCheck'     => 'nullable|boolean',
             'per_page'    => 'nullable|integer|min:1|max:100',
             'page'        => 'nullable|integer|min:1',
@@ -4109,6 +4113,22 @@ class ProjectController extends Controller
             if ($request->filled('EndDate')) {
                 $query->whereDate('ProjectTask.StartDate', '<=', $request->EndDate);
             }
+        }
+
+        // =========================
+        // PROGRESS CODE FILTER (IN)
+        // =========================
+        if ($request->filled('ProgressCode')) {
+            $query->whereIn('ProjectTask.ProgressCode', $request->ProgressCode);
+        }
+
+        // =========================
+        // PROGRESS BAR FILTER (BETWEEN)
+        // =========================
+        if ($request->filled('ProgressBar')) {
+            $minProgressBar = min($request->ProgressBar);
+            $maxProgressBar = max($request->ProgressBar);
+            $query->whereBetween('ProjectTask.ProgressBar', [$minProgressBar, $maxProgressBar]);
         }
 
         // =========================
