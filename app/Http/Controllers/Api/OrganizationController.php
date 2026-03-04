@@ -676,7 +676,7 @@ class OrganizationController extends Controller
                 }
 
                 $employeeCountByOrganization = Employee::where('OrganizationID', $id)
-                    ->where('IsActive', true)
+                    ->where('IsDelete', false)
                     ->count();
 
                 if ($employeeCountByOrganization > 0) {
