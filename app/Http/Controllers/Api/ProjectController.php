@@ -999,6 +999,7 @@ class ProjectController extends Controller
                 'page'      => 'nullable|integer|min:1',
                 'per_page'  => 'nullable|integer|min:1|max:100',
                 'Search'    => 'nullable|string|max:100',
+                'ProjectStatusCode' => 'nullable|string|in:00,10,11,12,99',
                 'StartDate' => 'nullable|date_format:Y-m-d',
                 'EndDate'   => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
             ], [
@@ -1064,6 +1065,15 @@ class ProjectController extends Controller
                 $query->where(function ($q) use ($request) {
                     $q->where('Project.ProjectName', 'like', '%' . $request->Search . '%')
                     ->orWhere('Project.ProjectDescription', 'like', '%' . $request->Search . '%');
+                });
+            }
+
+            // =========================
+            // STATUS FILTER
+            // =========================
+            if ($request->filled('ProjectStatusCode')) {
+                $query->whereHas('status', function ($q) use ($request) {
+                    $q->where('ProjectStatusCode', $request->ProjectStatusCode);
                 });
             }
             // =========================
