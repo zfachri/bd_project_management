@@ -254,6 +254,44 @@ class PositionController extends Controller
         try {
             $timestamp = Carbon::now()->timestamp;
             $authUserId = $request->auth_user_id;
+            $authUser = $request->auth_user;
+            $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
+
+            if (!$isAdmin) {
+                if (!$request->filled('ParentPositionID')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Non-admin can only create child positions. ParentPositionID is required.',
+                    ], 403);
+                }
+
+                $managedRootPositionIds = EmployeePosition::where('EmployeeID', $authUserId)
+                    ->where('IsActive', true)
+                    ->where('IsDelete', false)
+                    ->whereNull('EndDate')
+                    ->pluck('PositionID')
+                    ->map(function ($positionId) {
+                        return (int) $positionId;
+                    })
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                if (empty($managedRootPositionIds)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have an active position to create child position data',
+                    ], 403);
+                }
+
+                $editablePositionIds = $this->collectEditablePositionIds($managedRootPositionIds);
+                if (!in_array((int) $request->ParentPositionID, $editablePositionIds, true)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You can only create child positions under your own position and its descendants',
+                    ], 403);
+                }
+            }
 
             // Determine LevelNo and IsChild
             $levelNo = 1;
