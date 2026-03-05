@@ -418,6 +418,35 @@ class PositionController extends Controller
             $authUser = $request->auth_user;
             $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
 
+            if (!$isAdmin) {
+                $managedRootPositionIds = EmployeePosition::where('EmployeeID', $authUserId)
+                    ->where('IsActive', true)
+                    ->where('IsDelete', false)
+                    ->whereNull('EndDate')
+                    ->pluck('PositionID')
+                    ->map(function ($positionId) {
+                        return (int) $positionId;
+                    })
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                if (empty($managedRootPositionIds)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have an active position to edit position data',
+                    ], 403);
+                }
+
+                $editablePositionIds = $this->collectEditablePositionIds($managedRootPositionIds);
+                if (!in_array((int) $position->PositionID, $editablePositionIds, true)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You can only edit your own position and its descendants',
+                    ], 403);
+                }
+            }
+
             $oldData = [
                 'PositionName' => $position->PositionName,
                 'PositionLevelID' => $position->PositionLevelID,
@@ -470,15 +499,17 @@ class PositionController extends Controller
                     ], 403);
                 }
 
-                $newParentPositionId = $request->ParentPositionID ?: $position->PositionID;
-                $updateData['ParentPositionID'] = $newParentPositionId;
-                $updateData['IsChild'] = $newParentPositionId != $position->PositionID;
+                $newParentPositionId = (int) ($request->ParentPositionID ?: $position->PositionID);
+                if ($isAdmin) {
+                    $updateData['ParentPositionID'] = $newParentPositionId;
+                    $updateData['IsChild'] = $newParentPositionId != $position->PositionID;
 
-                if ($newParentPositionId == $position->PositionID) {
-                    $updateData['LevelNo'] = 1;
-                } else {
-                    $parentPosition = Position::find($newParentPositionId);
-                    $updateData['LevelNo'] = ($parentPosition->LevelNo ?? 0) + 1;
+                    if ($newParentPositionId == $position->PositionID) {
+                        $updateData['LevelNo'] = 1;
+                    } else {
+                        $parentPosition = Position::find($newParentPositionId);
+                        $updateData['LevelNo'] = ($parentPosition->LevelNo ?? 0) + 1;
+                    }
                 }
             }
 
@@ -976,5 +1007,37 @@ private function getPositionParentChain($position, $organizationId, &$visited = 
     }
 
     return $parents;
+}
+
+private function collectEditablePositionIds(array $rootPositionIds): array
+{
+    $queue = array_values(array_unique(array_map('intval', $rootPositionIds)));
+    $editable = [];
+
+    while (!empty($queue)) {
+        $currentPositionId = array_shift($queue);
+        if (isset($editable[$currentPositionId])) {
+            continue;
+        }
+
+        $editable[$currentPositionId] = true;
+
+        $childPositionIds = Position::where('ParentPositionID', $currentPositionId)
+            ->where('PositionID', '!=', $currentPositionId)
+            ->where('IsDelete', false)
+            ->pluck('PositionID')
+            ->map(function ($positionId) {
+                return (int) $positionId;
+            })
+            ->all();
+
+        foreach ($childPositionIds as $childPositionId) {
+            if (!isset($editable[$childPositionId])) {
+                $queue[] = $childPositionId;
+            }
+        }
+    }
+
+    return array_keys($editable);
 }
 }
