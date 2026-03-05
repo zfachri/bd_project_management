@@ -600,6 +600,37 @@ class PositionController extends Controller
             ], 404);
         }
 
+        $authUser = $request->auth_user;
+        $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
+        if (!$isAdmin) {
+            $managedRootPositionIds = EmployeePosition::where('EmployeeID', $request->auth_user_id)
+                ->where('IsActive', true)
+                ->where('IsDelete', false)
+                ->whereNull('EndDate')
+                ->pluck('PositionID')
+                ->map(function ($positionId) {
+                    return (int) $positionId;
+                })
+                ->unique()
+                ->values()
+                ->all();
+
+            if (empty($managedRootPositionIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have an active position to delete position data',
+                ], 403);
+            }
+
+            $editablePositionIds = $this->collectEditablePositionIds($managedRootPositionIds);
+            if (!in_array((int) $position->PositionID, $editablePositionIds, true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You can only delete your own position and its descendants',
+                ], 403);
+            }
+        }
+
         // Check if position has children
         $hasChildren = Position::where('ParentPositionID', $id)
             ->where('PositionID', '!=', $id)
@@ -700,6 +731,37 @@ class PositionController extends Controller
         try {
             $timestamp = Carbon::now()->timestamp;
             $authUserId = $request->auth_user_id;
+            $authUser = $request->auth_user;
+            $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
+
+            if (!$isAdmin) {
+                $managedRootPositionIds = EmployeePosition::where('EmployeeID', $authUserId)
+                    ->where('IsActive', true)
+                    ->where('IsDelete', false)
+                    ->whereNull('EndDate')
+                    ->pluck('PositionID')
+                    ->map(function ($positionId) {
+                        return (int) $positionId;
+                    })
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                if (empty($managedRootPositionIds)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have an active position to update position status',
+                    ], 403);
+                }
+
+                $editablePositionIds = $this->collectEditablePositionIds($managedRootPositionIds);
+                if (!in_array((int) $position->PositionID, $editablePositionIds, true)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You can only update status of your own position and its descendants',
+                    ], 403);
+                }
+            }
 
             $newStatus = !$position->IsActive;
 
