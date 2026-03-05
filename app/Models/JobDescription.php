@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 
 class JobDescription extends Model
@@ -38,6 +39,22 @@ class JobDescription extends Model
         'PositionID' => 'integer',
         'IsDelete' => 'boolean',
     ];
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function (self $model) {
+            $model->beforeInsert();
+        });
+    }
+
+    public function beforeInsert(): void
+    {
+        if (empty($this->RecordID)) {
+            $this->RecordID = Carbon::now()->timestamp . random_numbersu(5);
+        }
+    }
 
     // Relationships
     public function user()
