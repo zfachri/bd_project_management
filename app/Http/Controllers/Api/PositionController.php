@@ -388,6 +388,7 @@ class PositionController extends Controller
             'PositionLevelID' => 'required|integer|exists:PositionLevel,PositionLevelID',
             'RequirementQuantity' => 'nullable|integer|min:0',
             'IsActive' => 'nullable|boolean',
+            'ParentPositionID' => 'nullable|integer|exists:Position,PositionID',
 
             // Job Description fields (all optional)
             'JobDescription' => 'nullable|string',
@@ -414,12 +415,15 @@ class PositionController extends Controller
         try {
             $timestamp = Carbon::now()->timestamp;
             $authUserId = $request->auth_user_id;
+            $authUser = $request->auth_user;
+            $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
 
             $oldData = [
                 'PositionName' => $position->PositionName,
                 'PositionLevelID' => $position->PositionLevelID,
                 'RequirementQuantity' => $position->RequirementQuantity,
                 'IsActive' => $position->IsActive,
+                'ParentPositionID' => $position->ParentPositionID,
             ];
 
             $updateData = [
@@ -455,6 +459,26 @@ class PositionController extends Controller
                             'errors' => ''
                         ], 400);
                     }
+                }
+            }
+
+            if ($request->exists('ParentPositionID')) {
+                if (!$isAdmin) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Only administrator can change ParentPositionID',
+                    ], 403);
+                }
+
+                $newParentPositionId = $request->ParentPositionID ?: $position->PositionID;
+                $updateData['ParentPositionID'] = $newParentPositionId;
+                $updateData['IsChild'] = $newParentPositionId != $position->PositionID;
+
+                if ($newParentPositionId == $position->PositionID) {
+                    $updateData['LevelNo'] = 1;
+                } else {
+                    $parentPosition = Position::find($newParentPositionId);
+                    $updateData['LevelNo'] = ($parentPosition->LevelNo ?? 0) + 1;
                 }
             }
 
@@ -504,6 +528,7 @@ class PositionController extends Controller
                         'PositionLevelID' => $position->PositionLevelID,
                         'RequirementQuantity' => $position->RequirementQuantity,
                         'IsActive' => $position->IsActive,
+                        'ParentPositionID' => $position->ParentPositionID,
                     ]
                 ]),
                 'Note' => 'Position updated with job description'
