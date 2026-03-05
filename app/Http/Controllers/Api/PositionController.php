@@ -385,7 +385,7 @@ class PositionController extends Controller
 
         $validator = Validator::make($request->all(), [
             'PositionName' => 'required|string|max:100',
-            'PositionLevelID' => 'required|integer|exists:position_level,PositionLevelID',
+            'PositionLevelID' => 'required|integer|exists:PositionLevel,PositionLevelID',
             'RequirementQuantity' => 'nullable|integer|min:0',
             'IsActive' => 'nullable|boolean',
 

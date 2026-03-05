@@ -430,7 +430,7 @@ class EmployeeController extends Controller
             'UTCCode' => 'nullable|string|max:6',
 
             // Employee fields
-            'OrganizationID' => 'nullable|integer|exists:organization,OrganizationID',
+            'OrganizationID' => 'nullable|integer|exists:Organization,OrganizationID',
             'GenderCode' => 'nullable|in:M,F',
             'DateOfBirth' => 'nullable|date',
             'JoinDate' => 'nullable|date',
@@ -439,10 +439,10 @@ class EmployeeController extends Controller
             // Optional: Update positions
             'Positions' => 'nullable|array',
             'Positions.*.EmployeePositionID' => 'nullable|integer',
-            'Positions.*.PositionID' => 'nullable|integer|exists:position,PositionID',
+            'Positions.*.PositionID' => 'nullable|integer|exists:Position,PositionID',
             'Positions.*.PositionName' => 'required_with:Positions|string|max:100',
-            'Positions.*.ParentPositionID' => 'nullable|integer|exists:position,PositionID',
-            'Positions.*.PositionLevelID' => 'required_with:Positions|integer|exists:position_level,PositionLevelID',
+            'Positions.*.ParentPositionID' => 'nullable|integer|exists:Position,PositionID',
+            'Positions.*.PositionLevelID' => 'required_with:Positions|integer|exists:PositionLevel,PositionLevelID',
             'Positions.*.IsChild' => 'nullable|boolean',
             'Positions.*.LevelNo' => 'nullable|integer',
             'Positions.*.RequirementQuantity' => 'nullable|integer|min:0',
@@ -711,10 +711,10 @@ class EmployeeController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'PositionID' => 'nullable|integer|exists:position,PositionID',
+            'PositionID' => 'nullable|integer|exists:Position,PositionID',
             'PositionName' => 'required|string|max:100',
-            'ParentPositionID' => 'nullable|integer|exists:position,PositionID',
-            'PositionLevelID' => 'required|integer|exists:position_level,PositionLevelID',
+            'ParentPositionID' => 'nullable|integer|exists:Position,PositionID',
+            'PositionLevelID' => 'required|integer|exists:PositionLevel,PositionLevelID',
             'IsChild' => 'nullable|boolean',
             'LevelNo' => 'nullable|integer',
             'RequirementQuantity' => 'nullable|integer|min:0',
@@ -883,10 +883,10 @@ class EmployeeController extends Controller
         $employee = Employee::find($id);
 
         $validator = Validator::make($request->all(), [
-            'PositionID' => 'nullable|integer|exists:position,PositionID',
+            'PositionID' => 'nullable|integer|exists:Position,PositionID',
             'PositionName' => 'nullable|string|max:100',
-            'ParentPositionID' => 'nullable|integer|exists:position,PositionID',
-            'PositionLevelID' => 'nullable|integer|exists:position_level,PositionLevelID',
+            'ParentPositionID' => 'nullable|integer|exists:Position,PositionID',
+            'PositionLevelID' => 'nullable|integer|exists:PositionLevel,PositionLevelID',
             'IsChild' => 'nullable|boolean',
             'LevelNo' => 'nullable|integer',
             'RequirementQuantity' => 'nullable|integer|min:0',
