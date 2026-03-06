@@ -121,6 +121,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Route::middleware('permission:Employee.edit')->group(function () {
         Route::put('/{id}', [EmployeeController::class, 'update']);
         Route::patch('/{id}/resign', [EmployeeController::class, 'resign']);
+        Route::patch('/{id}/change-position', [EmployeeController::class, 'changePosition']);
         Route::post('/{id}/positions', [EmployeeController::class, 'addPosition']);
         Route::put('/{id}/positions/{positionId}', [EmployeeController::class, 'updatePosition']);
         Route::delete('/{id}/positions/{positionId}', [EmployeeController::class, 'removePosition']);

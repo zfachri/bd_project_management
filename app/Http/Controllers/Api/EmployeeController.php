@@ -520,120 +520,120 @@ class EmployeeController extends Controller
             }
 
             // Update or Add Positions if provided
-            $updatedPositions = [];
-            if ($request->has('Positions')) {
-                foreach ($request->Positions as $positionData) {
-                    $positionId = null;
+            // $updatedPositions = [];
+            // if ($request->has('Positions')) {
+            //     foreach ($request->Positions as $positionData) {
+            //         $positionId = null;
 
-                    // Check if PositionID exists and is valid
-                    if (!empty($positionData['PositionID'])) {
-                        $existingPosition = Position::where('PositionID', $positionData['PositionID'])
-                            ->where('IsDelete', false)
-                            ->first();
+            //         // Check if PositionID exists and is valid
+            //         if (!empty($positionData['PositionID'])) {
+            //             $existingPosition = Position::where('PositionID', $positionData['PositionID'])
+            //                 ->where('IsDelete', false)
+            //                 ->first();
 
-                        if ($existingPosition) {
-                            $positionId = $existingPosition->PositionID;
-                        }
-                    }
+            //             if ($existingPosition) {
+            //                 $positionId = $existingPosition->PositionID;
+            //             }
+            //         }
 
-                    // If position doesn't exist, create new one
-                    if (!$positionId) {
-                        // Determine LevelNo and IsChild
-                        $levelNo = $positionData['LevelNo'] ?? 1;
-                        $isChild = $positionData['IsChild'] ?? false;
+            //         // If position doesn't exist, create new one
+            //         if (!$positionId) {
+            //             // Determine LevelNo and IsChild
+            //             $levelNo = $positionData['LevelNo'] ?? 1;
+            //             $isChild = $positionData['IsChild'] ?? false;
 
-                        if (!empty($positionData['ParentPositionID'])) {
-                            $parentPosition = Position::find($positionData['ParentPositionID']);
-                            if ($parentPosition) {
-                                $levelNo = $parentPosition->LevelNo + 1;
-                                $isChild = true;
-                            }
-                        }
+            //             if (!empty($positionData['ParentPositionID'])) {
+            //                 $parentPosition = Position::find($positionData['ParentPositionID']);
+            //                 if ($parentPosition) {
+            //                     $levelNo = $parentPosition->LevelNo + 1;
+            //                     $isChild = true;
+            //                 }
+            //             }
 
-                        $newPositionId = Carbon::now()->timestamp . random_numbersu(5);
+            //             $newPositionId = Carbon::now()->timestamp . random_numbersu(5);
 
-                        $newPosition = Position::create([
-                            'PositionID' => $newPositionId,
-                            'AtTimeStamp' => $timestamp,
-                            'ByUserID' => $authUserId,
-                            'OperationCode' => 'I',
-                            'OrganizationID' => $employee->OrganizationID,
-                            'ParentPositionID' => $positionData['ParentPositionID'] ?? null,
-                            'LevelNo' => $levelNo,
-                            'IsChild' => $isChild,
-                            'PositionName' => $positionData['PositionName'],
-                            'PositionLevelID' => $positionData['PositionLevelID'],
-                            'RequirementQuantity' => $positionData['RequirementQuantity'] ?? 0,
-                            'IsActive' => true,
-                            'IsDelete' => false,
-                        ]);
+            //             $newPosition = Position::create([
+            //                 'PositionID' => $newPositionId,
+            //                 'AtTimeStamp' => $timestamp,
+            //                 'ByUserID' => $authUserId,
+            //                 'OperationCode' => 'I',
+            //                 'OrganizationID' => $employee->OrganizationID,
+            //                 'ParentPositionID' => $positionData['ParentPositionID'] ?? null,
+            //                 'LevelNo' => $levelNo,
+            //                 'IsChild' => $isChild,
+            //                 'PositionName' => $positionData['PositionName'],
+            //                 'PositionLevelID' => $positionData['PositionLevelID'],
+            //                 'RequirementQuantity' => $positionData['RequirementQuantity'] ?? 0,
+            //                 'IsActive' => true,
+            //                 'IsDelete' => false,
+            //             ]);
 
-                        // If no parent, set ParentPositionID to itself
-                        if (!$newPosition->ParentPositionID) {
-                            $newPosition->ParentPositionID = $newPositionId;
-                            $newPosition->save();
-                        }
+            //             // If no parent, set ParentPositionID to itself
+            //             if (!$newPosition->ParentPositionID) {
+            //                 $newPosition->ParentPositionID = $newPositionId;
+            //                 $newPosition->save();
+            //             }
 
-                        $positionId = $newPositionId;
+            //             $positionId = $newPositionId;
 
-                        // Log position creation
-                        AuditLog::create([
-                            'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
-                            'AtTimeStamp' => $timestamp,
-                            'ByUserID' => $authUserId,
-                            'OperationCode' => 'I',
-                            'ReferenceTable' => 'Position',
-                            'ReferenceRecordID' => $positionId,
-                            'Data' => json_encode([
-                                'PositionName' => $positionData['PositionName'],
-                                'OrganizationID' => $employee->OrganizationID,
-                                'CreatedDuringEmployeeUpdate' => true,
-                            ]),
-                            'Note' => 'Position created during employee update'
-                        ]);
-                    }
+            //             // Log position creation
+            //             AuditLog::create([
+            //                 'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+            //                 'AtTimeStamp' => $timestamp,
+            //                 'ByUserID' => $authUserId,
+            //                 'OperationCode' => 'I',
+            //                 'ReferenceTable' => 'Position',
+            //                 'ReferenceRecordID' => $positionId,
+            //                 'Data' => json_encode([
+            //                     'PositionName' => $positionData['PositionName'],
+            //                     'OrganizationID' => $employee->OrganizationID,
+            //                     'CreatedDuringEmployeeUpdate' => true,
+            //                 ]),
+            //                 'Note' => 'Position created during employee update'
+            //             ]);
+            //         }
 
-                    // Check if this is update or new position assignment
-                    if (!empty($positionData['EmployeePositionID'])) {
-                        // Update existing EmployeePosition
-                        $empPosition = EmployeePosition::where('EmployeePositionID', $positionData['EmployeePositionID'])
-                            ->where('EmployeeID', $id)
-                            ->first();
+            //         // Check if this is update or new position assignment
+            //         if (!empty($positionData['EmployeePositionID'])) {
+            //             // Update existing EmployeePosition
+            //             $empPosition = EmployeePosition::where('EmployeePositionID', $positionData['EmployeePositionID'])
+            //                 ->where('EmployeeID', $id)
+            //                 ->first();
 
-                        if ($empPosition) {
-                            $empPosition->update([
-                                'AtTimeStamp' => $timestamp,
-                                'ByUserID' => $authUserId,
-                                'OperationCode' => 'U',
-                                'PositionID' => $positionId,
-                                'StartDate' => $positionData['StartDate'],
-                                'EndDate' => $positionData['EndDate'] ?? null,
-                                'Note' => $positionData['Note'] ?? null,
-                            ]);
-                            $updatedPositions[] = $empPosition;
-                        }
-                    } else {
-                        // Create new EmployeePosition
-                        $empPositionId = Carbon::now()->timestamp . random_numbersu(5);
+            //             if ($empPosition) {
+            //                 $empPosition->update([
+            //                     'AtTimeStamp' => $timestamp,
+            //                     'ByUserID' => $authUserId,
+            //                     'OperationCode' => 'U',
+            //                     'PositionID' => $positionId,
+            //                     'StartDate' => $positionData['StartDate'],
+            //                     'EndDate' => $positionData['EndDate'] ?? null,
+            //                     'Note' => $positionData['Note'] ?? null,
+            //                 ]);
+            //                 $updatedPositions[] = $empPosition;
+            //             }
+            //         } else {
+            //             // Create new EmployeePosition
+            //             $empPositionId = Carbon::now()->timestamp . random_numbersu(5);
 
-                        $newEmpPosition = EmployeePosition::create([
-                            'EmployeePositionID' => $empPositionId,
-                            'AtTimeStamp' => $timestamp,
-                            'ByUserID' => $authUserId,
-                            'OperationCode' => 'I',
-                            'OrganizationID' => $employee->OrganizationID,
-                            'PositionID' => $positionId,
-                            'EmployeeID' => $employee->EmployeeID,
-                            'StartDate' => $positionData['StartDate'],
-                            'EndDate' => $positionData['EndDate'] ?? null,
-                            'Note' => $positionData['Note'] ?? null,
-                            'IsActive' => true,
-                            'IsDelete' => false,
-                        ]);
-                        $updatedPositions[] = $newEmpPosition;
-                    }
-                }
-            }
+            //             $newEmpPosition = EmployeePosition::create([
+            //                 'EmployeePositionID' => $empPositionId,
+            //                 'AtTimeStamp' => $timestamp,
+            //                 'ByUserID' => $authUserId,
+            //                 'OperationCode' => 'I',
+            //                 'OrganizationID' => $employee->OrganizationID,
+            //                 'PositionID' => $positionId,
+            //                 'EmployeeID' => $employee->EmployeeID,
+            //                 'StartDate' => $positionData['StartDate'],
+            //                 'EndDate' => $positionData['EndDate'] ?? null,
+            //                 'Note' => $positionData['Note'] ?? null,
+            //                 'IsActive' => true,
+            //                 'IsDelete' => false,
+            //             ]);
+            //             $updatedPositions[] = $newEmpPosition;
+            //         }
+            //     }
+            // }
 
             // Create audit log
             AuditLog::create([
@@ -650,7 +650,7 @@ class EmployeeController extends Controller
                         'OrganizationID' => $employee->OrganizationID,
                         'GenderCode' => $employee->GenderCode,
                     ],
-                    'PositionsUpdated' => count($updatedPositions),
+                    // 'PositionsUpdated' => count($updatedPositions),
                 ]),
                 'Note' => 'Employee updated'
             ]);
@@ -1070,6 +1070,242 @@ class EmployeeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update position',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Change employee current position
+     */
+    public function changePosition(Request $request, $id)
+    {
+        $employee = Employee::find($id);
+
+        if (!$employee) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Employee not found'
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'PositionID' => 'nullable|integer',
+            'PositionName' => 'required_without:PositionID|string|max:100',
+            'ParentPositionID' => 'nullable|integer|exists:Position,PositionID',
+            'PositionLevelID' => 'required_without:PositionID|integer|exists:PositionLevel,PositionLevelID',
+            'IsChild' => 'nullable|boolean',
+            'LevelNo' => 'nullable|integer',
+            'RequirementQuantity' => 'nullable|integer|min:0',
+            'StartDate' => 'required|date',
+            'Note' => 'nullable|string|max:200',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+
+        try {
+            $timestamp = Carbon::now()->timestamp;
+            $authUserId = $request->auth_user_id;
+            $positionId = null;
+            $positionCreated = false;
+
+            if(!$authUserId->IsAdministrator) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only Administrator can access this',
+                ], 403);
+            }
+
+            if (!empty($request->PositionID)) {
+                $existingPosition = Position::where('PositionID', $request->PositionID)
+                    ->where('IsDelete', false)
+                    ->first();
+
+                if ($existingPosition) {
+                    $positionId = $existingPosition->PositionID;
+                }
+            }
+
+            if (!$positionId) {
+                if (empty($request->PositionName) || empty($request->PositionLevelID)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'PositionName dan PositionLevelID wajib diisi jika PositionID tidak ditemukan'
+                    ], 422);
+                }
+
+                $levelNo = $request->LevelNo ?? 1;
+                $isChild = $request->IsChild ?? false;
+
+                if (!empty($request->ParentPositionID)) {
+                    $parentPosition = Position::find($request->ParentPositionID);
+                    if ($parentPosition) {
+                        $levelNo = $parentPosition->LevelNo + 1;
+                        $isChild = true;
+                    }
+                }
+
+                $newPositionId = Carbon::now()->timestamp . random_numbersu(5);
+
+                $newPosition = Position::create([
+                    'PositionID' => $newPositionId,
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'I',
+                    'OrganizationID' => $employee->OrganizationID,
+                    'ParentPositionID' => $request->ParentPositionID ?? null,
+                    'LevelNo' => $levelNo,
+                    'IsChild' => $isChild,
+                    'PositionName' => $request->PositionName,
+                    'PositionLevelID' => $request->PositionLevelID,
+                    'RequirementQuantity' => $request->RequirementQuantity ?? 0,
+                    'IsActive' => true,
+                    'IsDelete' => false,
+                ]);
+
+                if (!$newPosition->ParentPositionID) {
+                    $newPosition->ParentPositionID = $newPositionId;
+                    $newPosition->save();
+                }
+
+                $positionId = $newPositionId;
+                $positionCreated = true;
+
+                AuditLog::create([
+                    'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'I',
+                    'ReferenceTable' => 'Position',
+                    'ReferenceRecordID' => $positionId,
+                    'Data' => json_encode([
+                        'PositionName' => $request->PositionName,
+                        'OrganizationID' => $employee->OrganizationID,
+                        'CreatedDuringEmployeeChangePosition' => true,
+                    ]),
+                    'Note' => 'Position created during employee change position'
+                ]);
+            }
+
+            $currentEmployeePosition = EmployeePosition::where('EmployeeID', $employee->EmployeeID)
+                ->where('IsActive', true)
+                ->where('IsDelete', false)
+                ->whereNull('EndDate')
+                ->orderByDesc('StartDate')
+                ->first();
+
+            if ($currentEmployeePosition && (int) $currentEmployeePosition->PositionID === (int) $positionId) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Tidak ada perubahan posisi pada employee'
+                ], 400);
+            }
+
+            if ($currentEmployeePosition) {
+                $oldEmployeePositionData = [
+                    'PositionID' => $currentEmployeePosition->PositionID,
+                    'StartDate' => $currentEmployeePosition->StartDate,
+                    'EndDate' => $currentEmployeePosition->EndDate,
+                    'IsActive' => $currentEmployeePosition->IsActive,
+                ];
+
+                $currentEmployeePosition->update([
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'U',
+                    'EndDate' => $request->StartDate,
+                    'IsActive' => false,
+                ]);
+
+                AuditLog::create([
+                    'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+                    'AtTimeStamp' => $timestamp,
+                    'ByUserID' => $authUserId,
+                    'OperationCode' => 'U',
+                    'ReferenceTable' => 'EmployeePosition',
+                    'ReferenceRecordID' => $currentEmployeePosition->EmployeePositionID,
+                    'Data' => json_encode([
+                        'EmployeeID' => $employee->EmployeeID,
+                        'Old' => $oldEmployeePositionData,
+                        'New' => [
+                            'PositionID' => $currentEmployeePosition->PositionID,
+                            'StartDate' => $currentEmployeePosition->StartDate,
+                            'EndDate' => $currentEmployeePosition->EndDate,
+                            'IsActive' => $currentEmployeePosition->IsActive,
+                        ],
+                        'Reason' => 'Position changed to new active position'
+                    ]),
+                    'Note' => 'Employee previous position deactivated'
+                ]);
+            }
+
+            $newEmployeePosition = EmployeePosition::create([
+                'EmployeePositionID' => Carbon::now()->timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'OrganizationID' => $employee->OrganizationID,
+                'PositionID' => $positionId,
+                'EmployeeID' => $employee->EmployeeID,
+                'StartDate' => $request->StartDate,
+                'EndDate' => null,
+                'Note' => $request->Note,
+                'IsActive' => true,
+                'IsDelete' => false,
+            ]);
+
+            AuditLog::create([
+                'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'I',
+                'ReferenceTable' => 'EmployeePosition',
+                'ReferenceRecordID' => $newEmployeePosition->EmployeePositionID,
+                'Data' => json_encode([
+                    'EmployeeID' => $employee->EmployeeID,
+                    'EmployeePositionID' => $newEmployeePosition->EmployeePositionID,
+                    'PositionID' => $positionId,
+                    'StartDate' => $request->StartDate,
+                    'PositionCreated' => $positionCreated,
+                ]),
+                'Note' => 'Employee new position assigned'
+            ]);
+
+            DB::commit();
+
+            $newEmployeePosition->load('position.positionLevel');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Employee position changed successfully',
+                'data' => [
+                    'EmployeeID' => $employee->EmployeeID,
+                    'PreviousPositionID' => $currentEmployeePosition->PositionID ?? null,
+                    'EmployeePositionID' => $newEmployeePosition->EmployeePositionID,
+                    'PositionID' => $newEmployeePosition->PositionID,
+                    'PositionName' => $newEmployeePosition->position->PositionName ?? null,
+                    'PositionLevelName' => $newEmployeePosition->position->positionLevel->PositionLevelName ?? null,
+                    'StartDate' => $newEmployeePosition->StartDate,
+                    'EndDate' => $newEmployeePosition->EndDate,
+                    'PositionWasCreated' => $positionCreated,
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to change employee position',
                 'error' => $e->getMessage()
             ], 500);
         }
