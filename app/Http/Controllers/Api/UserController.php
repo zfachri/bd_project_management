@@ -9,6 +9,7 @@ use App\Models\AuditLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 
@@ -190,7 +191,7 @@ class UserController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $user = User::find($id);
+        $user = User::with(['loginCheck'])->find($id);
 
         if (!$user) {
             return response()->json([
@@ -199,9 +200,16 @@ class UserController extends Controller
             ], 404);
         }
 
+        if ($user->loginCheck && $user->loginCheck->UserStatusCode === '00') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Blocked user cannot be updated'
+            ], 403);
+        }
+
         $validator = Validator::make($request->all(), [
             'FullName' => 'nullable|string|max:100',
-            // 'Email' => 'nullable|email|max:100|unique:user,Email,' . $id . ',UserID',
+            'Email' => 'nullable|email|max:100|unique:User,Email,' . $id . ',UserID',
             // 'Password' => 'nullable|string|min:6',
             'UTCCode' => 'nullable|string|max:6',
         ]);
@@ -214,14 +222,16 @@ class UserController extends Controller
             ], 422);
         }
 
+        DB::beginTransaction();
+
         try {
             $timestamp = Carbon::now()->timestamp;
             $authUserId = $request->auth_user_id;
-            $userCheck = $user->loginCheck;
 
             $oldData = [
                 'FullName' => $user->FullName,
-                // 'Email' => $user->Email,
+                'Email' => $user->Email,
+                'UTCCode' => $user->UTCCode,
             ];
 
             $updateData = [
@@ -230,13 +240,16 @@ class UserController extends Controller
                 'OperationCode' => 'U',
             ];
 
+            $isEmailChanged = false;
+
             if ($request->has('FullName')) {
                 $updateData['FullName'] = $request->FullName;
             }
 
-            // if ($request->has('Email')) {
-            //     $updateData['Email'] = $request->email;
-            // }
+            if ($request->has('Email')) {
+                $updateData['Email'] = $request->Email;
+                $isEmailChanged = $request->Email !== $user->Email;
+            }
 
             // if ($request->has('Password')) {
             //     $Salt = Str::uuid()->toString();
@@ -255,6 +268,12 @@ class UserController extends Controller
 
             $user->update($updateData);
 
+            if ($isEmailChanged && $user->loginCheck) {
+                $user->loginCheck->update([
+                    'UserStatusCode' => '11',
+                ]);
+            }
+
             // Create audit log
             AuditLog::create([
                                 'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
@@ -267,17 +286,20 @@ class UserController extends Controller
                     'Old' => $oldData,
                     'New' => [
                         'FullName' => $user->FullName,
-                        'Esmail' => $user->Email,
+                        'Email' => $user->Email,
+                        'UTCCode' => $user->UTCCode,
                     ]
                 ]),
                 'Note' => 'User updated'
             ]);
 
+            DB::commit();
+
             return response()->json([
                 'success' => true,
                 'message' => 'User updated successfully',
                 'data' => [
-                    'IserID' => $user->UserID,
+                    'UserID' => $user->UserID,
                     'FullName' => $user->FullName,
                     'Email' => $user->Email,
                     'IsAdministrator' => $user->IsAdministrator,
@@ -286,6 +308,8 @@ class UserController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
+            DB::rollBack();
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update user',
@@ -332,7 +356,7 @@ class UserController extends Controller
 
             // Create audit log
             AuditLog::create([
-                                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
+                'AuditLogID'=>Carbon::now()->timestamp.random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'U',
@@ -439,6 +463,56 @@ class UserController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Get user audit logs
+     * Admin user: return only User logs
+     * Non-admin user: return User logs and Employee logs
+     */
+    public function getAuditLogs(Request $request, $id)
+    {
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        }
+
+        $userLogs = AuditLog::where('ReferenceTable', 'User')
+            ->where('ReferenceRecordID', $id)
+            ->orderBy('AtTimeStamp', 'desc')
+            ->get();
+
+        if ((bool) $user->IsAdministrator) {
+            return response()->json([
+                'success' => true,
+                'message' => 'User audit logs retrieved successfully',
+                'data' => [
+                    'UserID' => (int) $id,
+                    'IsAdministrator' => true,
+                    'UserLogs' => $userLogs,
+                ]
+            ], 200);
+        }
+
+        $employeeLogs = AuditLog::where('ReferenceTable', 'Employee')
+            ->where('ReferenceRecordID', $id)
+            ->orderBy('AtTimeStamp', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'User audit logs retrieved successfully',
+            'data' => [
+                'UserID' => (int) $id,
+                'IsAdministrator' => false,
+                'UserLogs' => $userLogs,
+                'EmployeeLogs' => $employeeLogs,
+            ]
+        ], 200);
     }
 
     /**

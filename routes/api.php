@@ -39,6 +39,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Route::middleware('permission:User.view')->group(function () {
         Route::get('/', [UserController::class, 'index']);
         Route::get('/{id}', [UserController::class, 'show']);
+        Route::get('/{id}/audit-logs', [UserController::class, 'getAuditLogs']);
         // });
 
         Route::post('/', [UserController::class, 'store']);
@@ -111,6 +112,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::get('/', [EmployeeController::class, 'index']);
         Route::get('/all', [EmployeeController::class, 'all']);
         Route::get('/{id}', [EmployeeController::class, 'show']);
+        Route::get('/{id}/audit-logs', [EmployeeController::class, 'getAuditLogs']);
         Route::get('/{id}/hierarchy', [EmployeeController::class, 'getHierarchy']);
         Route::get('/hierarchy/tree', [EmployeeController::class, 'getOrganizationHierarchyTree']);
         // });

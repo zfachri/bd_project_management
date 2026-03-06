@@ -424,9 +424,17 @@ class EmployeeController extends Controller
             ], 404);
         }
 
+        if ($employee->IsDelete) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Deleted employee cannot be updated'
+            ], 403);
+        }
+
         $validator = Validator::make($request->all(), [
             // User fields
             'FullName' => 'nullable|string|max:100',
+            'Email' => 'nullable|email|max:100|unique:User,Email,' . $id . ',UserID',
             'UTCCode' => 'nullable|string|max:6',
 
             // Employee fields
@@ -464,9 +472,12 @@ class EmployeeController extends Controller
         try {
             $timestamp = Carbon::now()->timestamp;
             $authUserId = $request->auth_user_id;
+            $isEmailChanged = false;
+            $oldUserData = null;
 
             $oldData = [
                 'FullName' => $employee->user->FullName ?? null,
+                'Email' => $employee->user->Email ?? null,
                 'OrganizationID' => $employee->OrganizationID,
                 'GenderCode' => $employee->GenderCode,
             ];
@@ -501,7 +512,13 @@ class EmployeeController extends Controller
             $employee->update($employeeUpdateData);
 
             // Update User if fields provided
-            if ($employee->user && ($request->has('FullName') || $request->has('UTCCode'))) {
+            if ($employee->user && ($request->has('FullName') || $request->has('Email') || $request->has('UTCCode'))) {
+                $oldUserData = [
+                    'FullName' => $employee->user->FullName,
+                    'Email' => $employee->user->Email,
+                    'UTCCode' => $employee->user->UTCCode,
+                ];
+
                 $userUpdateData = [
                     'AtTimeStamp' => $timestamp,
                     'ByUserID' => $authUserId,
@@ -512,11 +529,44 @@ class EmployeeController extends Controller
                     $userUpdateData['FullName'] = $request->FullName;
                 }
 
+                if ($request->has('Email')) {
+                    $userUpdateData['Email'] = $request->Email;
+                    $isEmailChanged = $request->Email !== $employee->user->Email;
+                }
+
                 if ($request->has('UTCCode')) {
                     $userUpdateData['UTCCode'] = $request->UTCCode;
                 }
 
                 $employee->user->update($userUpdateData);
+
+                if ($isEmailChanged && $employee->user->loginCheck) {
+                    $employee->user->loginCheck->update([
+                        'UserStatusCode' => '11',
+                    ]);
+                }
+
+                if ($isEmailChanged) {
+                    AuditLog::create([
+                        'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+                        'AtTimeStamp' => $timestamp,
+                        'ByUserID' => $authUserId,
+                        'OperationCode' => 'U',
+                        'ReferenceTable' => 'User',
+                        'ReferenceRecordID' => $employee->user->UserID,
+                        'Data' => json_encode([
+                            'EmployeeID' => $employee->EmployeeID,
+                            'Old' => $oldUserData,
+                            'New' => [
+                                'FullName' => $employee->user->FullName,
+                                'Email' => $employee->user->Email,
+                                'UTCCode' => $employee->user->UTCCode,
+                            ],
+                            'EmailChanged' => true,
+                        ]),
+                        'Note' => 'User updated via employee update (email changed)'
+                    ]);
+                }
             }
 
             // Update or Add Positions if provided
@@ -647,6 +697,7 @@ class EmployeeController extends Controller
                     'Old' => $oldData,
                     'New' => [
                         'FullName' => $employee->user->FullName ?? null,
+                        'Email' => $employee->user->Email ?? null,
                         'OrganizationID' => $employee->OrganizationID,
                         'GenderCode' => $employee->GenderCode,
                     ],
@@ -1558,6 +1609,50 @@ class EmployeeController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Get employee audit logs grouped by reference table
+     */
+    public function getAuditLogs(Request $request, $id)
+    {
+        $employee = Employee::find($id);
+
+        if (!$employee) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Employee not found'
+            ], 404);
+        }
+
+        $userLogs = AuditLog::where('ReferenceTable', 'User')
+            ->where('ReferenceRecordID', $id)
+            ->orderBy('AtTimeStamp', 'desc')
+            ->get();
+
+        $employeeLogs = AuditLog::where('ReferenceTable', 'Employee')
+            ->where('ReferenceRecordID', $id)
+            ->orderBy('AtTimeStamp', 'desc')
+            ->get();
+
+        $employeePositionLogs = AuditLog::where('ReferenceTable', 'EmployeePosition')
+            ->where(function ($query) use ($id) {
+                $query->where('Data', 'like', '%"EmployeeID":' . $id . '%')
+                    ->orWhere('Data', 'like', '%"EmployeeID":"' . $id . '"%');
+            })
+            ->orderBy('AtTimeStamp', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Employee audit logs retrieved successfully',
+            'data' => [
+                'EmployeeID' => (int) $id,
+                'UserLogs' => $userLogs,
+                'EmployeeLogs' => $employeeLogs,
+                'EmployeePositionLogs' => $employeePositionLogs,
+            ]
+        ], 200);
     }
 
 
