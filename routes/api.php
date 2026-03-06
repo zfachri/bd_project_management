@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\FileUploadController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\ProjectFilterController;
+use App\Http\Controllers\Api\AuditLogController;
 
 /*
 |--------------------------------------------------------------------------
@@ -321,5 +322,10 @@ Route::middleware(['jwt.auth'])->group(function () {
         Route::post('{projectId}/mini-goals', [ProjectController::class, 'addMiniGoal']);
         Route::put('{projectId}/mini-goals/{miniGoalId}', [ProjectController::class, 'updateMiniGoal']);
         Route::put('{projectId}/mini-goals/{miniGoalId}/delete', [ProjectController::class, 'deleteMiniGoal']);
+    });
+
+    Route::prefix('audit-logs')->group(function () {
+        Route::get('/', [AuditLogController::class, 'index']);
+        Route::get('/{auditLogId}', [AuditLogController::class, 'show']);
     });
 });
