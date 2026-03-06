@@ -1683,6 +1683,7 @@ class EmployeeController extends Controller
                 'OrganizationName' => $position->organization->OrganizationName ?? null,
                 'Employees' => $employees,
                 'EmployeeCount' => $employees->count(),
+                'EmployeePosition' => $employeePositions
             ]
         ], 200);
     }
