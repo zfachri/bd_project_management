@@ -180,7 +180,7 @@ class EmployeeController extends Controller
             // User fields
             'FullName' => 'required|string|max:100',
             'Email' => 'required|email|max:100|unique:User,Email',
-            'Password' => 'required|string|min:6',
+            'Password' => 'nullable|string|min:6',
             'UTCCode' => 'nullable|string|max:6',
 
             // Employee fields
