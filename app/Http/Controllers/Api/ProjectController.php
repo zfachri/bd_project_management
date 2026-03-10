@@ -1000,6 +1000,7 @@ class ProjectController extends Controller
                 'per_page'  => 'nullable|integer|min:1|max:100',
                 'Search'    => 'nullable|string|max:100',
                 'ProjectStatusCode' => 'nullable|string|in:00,10,11,12,99',
+                'Label' => 'nullable|string|in:OVERDUE,TODAY,WARNING',
                 'StartDate' => 'nullable|date_format:Y-m-d',
                 'EndDate'   => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
             ], [
@@ -1017,6 +1018,9 @@ class ProjectController extends Controller
             $isAdmin = (bool) ($authUser->IsAdministrator ?? false);
             $perPage    = $request->per_page ?? 10;
             $page       = $request->page ?? 1;
+            $today = Carbon::today()->startOfDay();
+            $todayDate = $today->toDateString();
+            $tomorrowDate = $today->copy()->addDay()->toDateString();
             // ----------------------------------------
             // BASE QUERY
             // ----------------------------------------
@@ -1076,6 +1080,25 @@ class ProjectController extends Controller
                     $q->where('ProjectStatusCode', $request->ProjectStatusCode);
                 });
             }
+
+            // =========================
+            // LABEL FILTER
+            // =========================
+            if ($request->filled('Label')) {
+                $label = strtoupper($request->Label);
+                if ($label === 'OVERDUE') {
+                    $query->whereDate('Project.EndDate', '<', $todayDate);
+                } elseif ($label === 'WARNING') {
+                    $query->whereDate('Project.EndDate', '=', $tomorrowDate);
+                } elseif ($label === 'TODAY') {
+                    $query->where(function ($q) use ($todayDate, $tomorrowDate) {
+                        $q->whereDate('Project.EndDate', '=', $todayDate)
+                            ->orWhereDate('Project.EndDate', '>', $tomorrowDate)
+                            ->orWhereNull('Project.EndDate');
+                    });
+                }
+            }
+
             // =========================
             // DATE FILTER (OVERLAP)
             // =========================
@@ -1090,6 +1113,20 @@ class ProjectController extends Controller
                     $q->whereDate('Project.StartDate', '<=', $request->StartDate)
                       ->whereDate('Project.EndDate', '>=', $request->EndDate);
                 });
+            } elseif ($request->filled('EndDate') && !$request->filled('StartDate')) {
+                $endDate = $request->EndDate;
+                $query->where(function ($q) use ($endDate) {
+                    $q->where(function ($qDateScope) use ($endDate) {
+                        $qDateScope->whereDate('Project.StartDate', '<=', $endDate)
+                            ->whereDate('Project.EndDate', '>=', $endDate);
+                    })->orWhere(function ($qOnProgressOverdue) use ($endDate) {
+                        $qOnProgressOverdue->whereDate('Project.StartDate', '<=', $endDate)
+                            ->whereDate('Project.EndDate', '<', $endDate)
+                            ->whereHas('status', function ($qStatus) {
+                                $qStatus->where('ProjectStatusCode', '11');
+                            });
+                    });
+                });
             }
             // =========================
             // PAGINATION
@@ -1100,7 +1137,7 @@ class ProjectController extends Controller
             // =========================
             // TRANSFORM RESPONSE
             // =========================
-            $data = $projects->getCollection()->transform(function ($project) use ($authUserId, $isAdmin) {
+            $data = $projects->getCollection()->transform(function ($project) use ($authUserId, $isAdmin, $today) {
                 $member = null;
                 if (!$isAdmin) {
                     $member = ProjectMember::where('ProjectID', $project->ProjectID)
@@ -1118,6 +1155,17 @@ class ProjectController extends Controller
                         2
                     );
                 }
+
+                $label = 'TODAY';
+                if (!empty($project->EndDate)) {
+                    $projectEndDate = Carbon::parse($project->EndDate)->startOfDay();
+                    if ($projectEndDate->lt($today)) {
+                        $label = 'OVERDUE';
+                    } elseif ($projectEndDate->equalTo($today->copy()->addDay())) {
+                        $label = 'WARNING';
+                    }
+                }
+
                 return 
                 [
                     'ProjectID'          => $project->ProjectID,
@@ -1140,6 +1188,7 @@ class ProjectController extends Controller
                         ? 'ADMIN'
                         : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
                     'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
+                    'Label' => $label,
                 ];
             });
             return response()->json([
