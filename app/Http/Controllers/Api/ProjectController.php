@@ -1021,6 +1021,9 @@ class ProjectController extends Controller
             $today = Carbon::today()->startOfDay();
             $todayDate = $today->toDateString();
             $tomorrowDate = $today->copy()->addDay()->toDateString();
+            $labelReferenceDate = $request->filled('EndDate')
+                ? Carbon::parse($request->EndDate)->startOfDay()
+                : $today->copy();
             // ----------------------------------------
             // BASE QUERY
             // ----------------------------------------
@@ -1114,19 +1117,7 @@ class ProjectController extends Controller
                       ->whereDate('Project.EndDate', '>=', $request->EndDate);
                 });
             } elseif ($request->filled('EndDate') && !$request->filled('StartDate')) {
-                $endDate = $request->EndDate;
-                $query->where(function ($q) use ($endDate) {
-                    $q->where(function ($qDateScope) use ($endDate) {
-                        $qDateScope->whereDate('Project.StartDate', '<=', $endDate)
-                            ->whereDate('Project.EndDate', '>=', $endDate);
-                    })->orWhere(function ($qOnProgressOverdue) use ($endDate) {
-                        $qOnProgressOverdue->whereDate('Project.StartDate', '<=', $endDate)
-                            ->whereDate('Project.EndDate', '<', $endDate)
-                            ->whereHas('status', function ($qStatus) {
-                                $qStatus->where('ProjectStatusCode', '11');
-                            });
-                    });
-                });
+                $query->whereDate('Project.StartDate', '<=', $request->EndDate);
             }
             // =========================
             // PAGINATION
@@ -1137,7 +1128,7 @@ class ProjectController extends Controller
             // =========================
             // TRANSFORM RESPONSE
             // =========================
-            $data = $projects->getCollection()->transform(function ($project) use ($authUserId, $isAdmin, $today) {
+            $data = $projects->getCollection()->transform(function ($project) use ($authUserId, $isAdmin, $labelReferenceDate) {
                 $member = null;
                 if (!$isAdmin) {
                     $member = ProjectMember::where('ProjectID', $project->ProjectID)
@@ -1156,13 +1147,27 @@ class ProjectController extends Controller
                     );
                 }
 
-                $label = 'TODAY';
-                if (!empty($project->EndDate)) {
-                    $projectEndDate = Carbon::parse($project->EndDate)->startOfDay();
-                    if ($projectEndDate->lt($today)) {
-                        $label = 'OVERDUE';
-                    } elseif ($projectEndDate->equalTo($today->copy()->addDay())) {
-                        $label = 'WARNING';
+                $statusCode = $project->status->ProjectStatusCode ?? null;
+                $labeling = 'TODAY';
+
+                if ($statusCode === '99') {
+                    $labeling = 'COMPLETED';
+                } elseif ($statusCode === '12') {
+                    $labeling = 'HOLD';
+                } elseif ($statusCode === '00') {
+                    $labeling = 'VOID';
+                } elseif ($statusCode === '11') {
+                    if (!empty($project->EndDate)) {
+                        $projectEndDate = Carbon::parse($project->EndDate)->startOfDay();
+                        if ($projectEndDate->lt($labelReferenceDate)) {
+                            $labeling = 'OVERDUE';
+                        } elseif ($projectEndDate->equalTo($labelReferenceDate->copy()->addDay())) {
+                            $labeling = 'WARNING';
+                        } else {
+                            $labeling = 'TODAY';
+                        }
+                    } else {
+                        $labeling = 'TODAY';
                     }
                 }
 
@@ -1188,7 +1193,7 @@ class ProjectController extends Controller
                         ? 'ADMIN'
                         : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
                     'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
-                    'Label' => $label,
+                    'Labeling' => $labeling,
                 ];
             });
             return response()->json([
@@ -1465,31 +1470,61 @@ class ProjectController extends Controller
                 });
             }
 
-            // Keep date filter behavior aligned with index().
-            if ($request->filled('StartDate') && $request->filled('EndDate')) {
-                $query->where(function ($q) use ($request) {
-                    $q->whereDate('Project.StartDate', '<=', $request->StartDate)
+            // Keep date filter behavior aligned with summary requirement.
+            $applyDateScope = function ($builder) use ($request) {
+                if ($request->filled('StartDate') && $request->filled('EndDate')) {
+                    $builder->whereDate('Project.StartDate', '<=', $request->StartDate)
                         ->whereDate('Project.EndDate', '>=', $request->EndDate);
-                });
-            } elseif ($request->filled('EndDate') && !$request->filled('StartDate')) {
-                $endDate = $request->EndDate;
-                $query->where(function ($q) use ($endDate) {
-                    $q->where(function ($qDateScope) use ($endDate) {
-                        $qDateScope->whereDate('Project.StartDate', '<=', $endDate)
-                            ->whereDate('Project.EndDate', '>=', $endDate);
-                    })->orWhere(function ($qOnProgressOverdue) use ($endDate) {
-                        $qOnProgressOverdue->whereDate('Project.StartDate', '<=', $endDate)
-                            ->whereDate('Project.EndDate', '<', $endDate)
-                            ->where('ProjectStatus.ProjectStatusCode', '11');
-                    });
-                });
-            }
+                } elseif ($request->filled('EndDate') && !$request->filled('StartDate')) {
+                    // EndDate-only: include all projects that have started up to EndDate.
+                    $builder->whereDate('Project.StartDate', '<=', $request->EndDate);
+                } elseif ($request->filled('StartDate') && !$request->filled('EndDate')) {
+                    $builder->whereDate('Project.EndDate', '>=', $request->StartDate);
+                }
+            };
 
-            $statusCounts = $query
+            $statusQuery = clone $query;
+            $applyDateScope($statusQuery);
+
+            $statusCounts = $statusQuery
                 ->selectRaw('ProjectStatus.ProjectStatusCode')
                 ->selectRaw('COUNT(Project.ProjectID) as total')
                 ->groupBy('ProjectStatus.ProjectStatusCode')
                 ->pluck('total', 'ProjectStatusCode');
+
+            $labelQuery = clone $query;
+            $applyDateScope($labelQuery);
+
+            $todayDate = Carbon::today()->toDateString();
+            $tomorrowDate = Carbon::today()->addDay()->toDateString();
+
+            $labelSummary = [
+                [
+                    'Label' => 'OVERDUE',
+                    'total' => (clone $labelQuery)
+                        ->whereDate('Project.EndDate', '<', $todayDate)
+                        ->distinct()
+                        ->count('Project.ProjectID'),
+                ],
+                [
+                    'Label' => 'TODAY',
+                    'total' => (clone $labelQuery)
+                        ->where(function ($q) use ($todayDate, $tomorrowDate) {
+                            $q->whereDate('Project.EndDate', '=', $todayDate)
+                                ->orWhereDate('Project.EndDate', '>', $tomorrowDate)
+                                ->orWhereNull('Project.EndDate');
+                        })
+                        ->distinct()
+                        ->count('Project.ProjectID'),
+                ],
+                [
+                    'Label' => 'WARNING',
+                    'total' => (clone $labelQuery)
+                        ->whereDate('Project.EndDate', '=', $tomorrowDate)
+                        ->distinct()
+                        ->count('Project.ProjectID'),
+                ],
+            ];
 
             $data = collect(ProjectStatus::STATUS_NAMES)
                 ->map(function ($statusName, $statusCode) use ($statusCounts) {
@@ -1504,6 +1539,7 @@ class ProjectController extends Controller
             return response()->json([
                 'success' => true,
                 'data'    => $data,
+                'label_summary' => $labelSummary,
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
