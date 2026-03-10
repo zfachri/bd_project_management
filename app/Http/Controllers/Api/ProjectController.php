@@ -1205,6 +1205,256 @@ class ProjectController extends Controller
     }
 
     /**
+     * List projects for owner/admin page:
+     * - ProjectStatusCode fixed to 11 (ON-PROGRESS)
+     * - All active tasks in project must be IsCheck = true
+     */
+    public function ownerCheckedProjects(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'page'      => 'nullable|integer|min:1',
+                'per_page'  => 'nullable|integer|min:1|max:100',
+                'Search'    => 'nullable|string|max:100',
+                'StartDate' => 'nullable|date_format:Y-m-d',
+                'EndDate'   => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
+            ], [
+                'EndDate.after_or_equal' => 'EndDate must be greater than or equal to StartDate.'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors'  => $validator->errors(),
+                ], 422);
+            }
+
+            $authUser   = $request->auth_user;
+            $authUserId = $request->auth_user_id;
+            $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
+            $perPage    = $request->per_page ?? 10;
+            $page       = $request->page ?? 1;
+
+            if (!$isAdmin) {
+                $isOwnerAnyProject = ProjectMember::where('UserID', $authUserId)
+                    ->where('IsOwner', true)
+                    ->where('IsActive', true)
+                    ->exists();
+
+                if (!$isOwnerAnyProject) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Only admin or project owner can access this endpoint',
+                    ], 403);
+                }
+            }
+
+            $query = Project::query()
+                ->where('Project.IsDelete', false)
+                ->with('status')
+                ->whereHas('status', function ($q) {
+                    $q->where('ProjectStatusCode', '11');
+                })
+                // At least one active task exists.
+                ->whereExists(function ($q) {
+                    $q->selectRaw(1)
+                        ->from('ProjectTask')
+                        ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
+                        ->where('ProjectTask.IsDelete', false);
+                })
+                // No active task with IsCheck = false.
+                ->whereNotExists(function ($q) {
+                    $q->selectRaw(1)
+                        ->from('ProjectTask')
+                        ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
+                        ->where('ProjectTask.IsDelete', false)
+                        ->where('ProjectTask.IsCheck', false);
+                })
+                ->select('Project.*')
+                ->selectSub(function ($q) {
+                    $q->from('ProjectTask')
+                        ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
+                        ->where('ProjectTask.IsDelete', false)
+                        ->selectRaw('COUNT(*)');
+                }, 'total_task')
+                ->selectSub(function ($q) {
+                    $q->from('ProjectTask')
+                        ->whereColumn('ProjectTask.ProjectID', 'Project.ProjectID')
+                        ->where('ProjectTask.IsDelete', false)
+                        ->selectRaw("
+                        COALESCE(SUM(
+                            CASE
+                                WHEN ProgressBar = 100 AND IsCheck = 0 THEN 99
+                                ELSE ProgressBar
+                            END
+                        ), 0)
+                      ");
+                }, 'total_progress');
+
+            if (!$isAdmin) {
+                $query->whereIn('Project.ProjectID', function ($q) use ($authUserId) {
+                    $q->select('ProjectID')
+                        ->from('ProjectMember')
+                        ->where('UserID', $authUserId)
+                        ->where('IsOwner', true)
+                        ->where('IsActive', true);
+                });
+            }
+
+            if ($request->filled('Search')) {
+                $query->where(function ($q) use ($request) {
+                    $q->where('Project.ProjectName', 'like', '%' . $request->Search . '%')
+                        ->orWhere('Project.ProjectDescription', 'like', '%' . $request->Search . '%');
+                });
+            }
+
+            // Keep date filter behavior aligned with index().
+            if ($request->filled('StartDate') && $request->filled('EndDate')) {
+                $query->where(function ($q) use ($request) {
+                    $q->whereDate('Project.StartDate', '<=', $request->StartDate)
+                        ->whereDate('Project.EndDate', '>=', $request->EndDate);
+                });
+            }
+
+            $projects = $query
+                ->orderBy('Project.AtTimeStamp', 'DESC')
+                ->paginate($perPage, ['*'], 'page', $page);
+
+            $data = $projects->getCollection()->transform(function ($project) use ($authUserId, $isAdmin) {
+                $member = null;
+                if (!$isAdmin) {
+                    $member = ProjectMember::where('ProjectID', $project->ProjectID)
+                        ->where('UserID', $authUserId)
+                        ->where('IsActive', true)
+                        ->first();
+                }
+
+                $projectProgress = 0;
+                if ($project->total_task > 0) {
+                    $projectProgress = round($project->total_progress / $project->total_task, 2);
+                }
+
+                return [
+                    'ProjectID'           => $project->ProjectID,
+                    'ProjectName'         => $project->ProjectName,
+                    'ProjectDescription'  => $project->ProjectDescription,
+                    'StartDate'           => $project->StartDate,
+                    'EndDate'             => $project->EndDate,
+                    'PriorityCode'        => $project->PriorityCode,
+                    'Progress'            => $projectProgress,
+                    'Status' => [
+                        'ProjectStatusCode'  => $project->status->ProjectStatusCode ?? null,
+                        'ProjectStatusName'  => ProjectStatus::nameFromCode($project->status->ProjectStatusCode ?? null),
+                        'TotalMember'        => $project->status->TotalMember ?? 0,
+                        'TotalTask'          => $project->status->TotalTask ?? 0,
+                        'TotalExpense'       => $project->status->TotalExpense ?? 0,
+                        'AccumulatedExpense' => $project->status->AccumulatedExpense ?? 0,
+                    ],
+                    'role' => $isAdmin
+                        ? 'ADMIN'
+                        : ($member?->IsOwner ? 'OWNER' : 'MEMBER'),
+                    'is_owner' => $isAdmin ? true : ($member?->IsOwner ?? false),
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'role'    => $isAdmin ? 'ADMIN' : 'OWNER',
+                'data'    => $data,
+                'meta'    => [
+                    'current_page' => $projects->currentPage(),
+                    'per_page'     => $projects->perPage(),
+                    'total'        => $projects->total(),
+                    'last_page'    => $projects->lastPage(),
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch owner checked project list',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Summary total project per status.
+     *
+     * GET /projects/summary
+     */
+    public function summary(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'StartDate' => 'nullable|date_format:Y-m-d',
+                'EndDate'   => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
+            ], [
+                'EndDate.after_or_equal' => 'EndDate must be greater than or equal to StartDate.'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors'  => $validator->errors(),
+                ], 422);
+            }
+
+            $authUser   = $request->auth_user;
+            $authUserId = $request->auth_user_id;
+            $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
+
+            $startDate = $request->input('StartDate', Carbon::today()->format('Y-m-d'));
+            $endDate   = $request->input('EndDate', Carbon::today()->format('Y-m-d'));
+
+            $query = Project::query()
+                ->where('Project.IsDelete', false)
+                ->leftJoin('ProjectStatus', 'ProjectStatus.ProjectID', '=', 'Project.ProjectID');
+
+            if (!$isAdmin) {
+                $query->whereIn('Project.ProjectID', function ($q) use ($authUserId) {
+                    $q->select('ProjectID')
+                        ->from('ProjectMember')
+                        ->where('UserID', $authUserId)
+                        ->where('IsActive', true);
+                });
+            }
+
+            // Keep date filter behavior aligned with index().
+            $query->where(function ($q) use ($startDate, $endDate) {
+                $q->whereDate('Project.StartDate', '<=', $startDate)
+                    ->whereDate('Project.EndDate', '>=', $endDate);
+            });
+
+            $statusCounts = $query
+                ->selectRaw('ProjectStatus.ProjectStatusCode')
+                ->selectRaw('COUNT(Project.ProjectID) as total')
+                ->groupBy('ProjectStatus.ProjectStatusCode')
+                ->pluck('total', 'ProjectStatusCode');
+
+            $data = collect(ProjectStatus::STATUS_NAMES)
+                ->map(function ($statusName, $statusCode) use ($statusCounts) {
+                    return [
+                        'ProjectStatusCode' => $statusCode,
+                        'ProjectStatusName' => $statusName,
+                        'total' => (int) ($statusCounts[$statusCode] ?? 0),
+                    ];
+                })
+                ->values();
+
+            return response()->json([
+                'success' => true,
+                'data'    => $data,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get project summary by status',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Get Project Detail
      * 
      * GET /projects/{id}?include=members,tasks,expenses
@@ -4246,20 +4496,13 @@ class ProjectController extends Controller
         // =========================
         $query->where(function ($q) use ($mode, $targetUserIds) {
             $ownerFilter = function ($ownerQuery) use ($targetUserIds) {
-                $ownerQuery->where(function ($directCreatorQuery) use ($targetUserIds) {
-                    $directCreatorQuery->where('ProjectTask.OperationCode', 'I')
-                        ->whereNotNull('ProjectTask.ByUserID')
-                        ->whereIn('ProjectTask.ByUserID', $targetUserIds);
-                })->orWhere(function ($auditCreatorQuery) use ($targetUserIds) {
-                    $auditCreatorQuery->where('ProjectTask.OperationCode', 'U')
-                        ->whereExists(function ($sub) use ($targetUserIds) {
-                            $sub->selectRaw(1)
-                                ->from('AuditLog as al')
-                                ->where('al.ReferenceTable', 'ProjectTask')
-                                ->whereColumn('al.ReferenceRecordID', 'ProjectTask.ProjectTaskID')
-                                ->where('al.OperationCode', 'I')
-                                ->whereIn('al.ByUserID', $targetUserIds);
-                        });
+                $ownerQuery->whereExists(function ($sub) use ($targetUserIds) {
+                    $sub->selectRaw(1)
+                        ->from('ProjectMember as pm')
+                        ->whereColumn('pm.ProjectID', 'ProjectTask.ProjectID')
+                        ->whereIn('pm.UserID', $targetUserIds)
+                        ->where('pm.IsOwner', true)
+                        ->where('pm.IsActive', true);
                 });
             };
 
@@ -4322,6 +4565,130 @@ class ProjectController extends Controller
         return response()->json([
             'success' => true,
             'mode'    => $mode,
+            'data'    => $tasks,
+        ]);
+    }
+
+    /**
+     * List task check owner:
+     * - ProgressBar = 100
+     * - IsCheck = false
+     * - Project status must be ON-PROGRESS (11)
+     * Access: admin or project owner only.
+     */
+    public function ownerCheckTasks(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'ProjectID'   => 'nullable|array',
+            'ProjectID.*' => 'integer',
+            'UserID'      => 'nullable|array',
+            'UserID.*'    => 'integer|exists:User,UserID',
+            'StartDate'   => 'nullable|date_format:Y-m-d',
+            'EndDate'     => 'nullable|date_format:Y-m-d',
+            'IsCheck'     => 'nullable|boolean',
+            'per_page'    => 'nullable|integer|min:1|max:100',
+            'page'        => 'nullable|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        $authUser   = $request->auth_user;
+        $authUserId = $request->auth_user_id;
+        $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
+        $perPage    = $request->per_page ?? 10;
+        $page       = $request->page ?? 1;
+
+        // For admin: optional owner filter by UserID[].
+        // For non-admin: always self owner scope.
+        if ($isAdmin && $request->filled('UserID')) {
+            $ownerUserIds = $request->UserID;
+        } else {
+            $ownerUserIds = [$authUserId];
+        }
+
+        $query = ProjectTask::query()
+            ->select([
+                'ProjectTask.*',
+                'Project.ProjectName',
+                DB::raw("
+                    CASE
+                        WHEN ProjectTask.OperationCode = 'I' AND ProjectTask.ByUserID IS NOT NULL
+                            THEN ProjectTask.ByUserID
+                        ELSE (
+                            SELECT al.ByUserID
+                            FROM AuditLog al
+                            WHERE al.ReferenceTable = 'ProjectTask'
+                                AND al.ReferenceRecordID = ProjectTask.ProjectTaskID
+                                AND al.OperationCode = 'I'
+                            ORDER BY al.AtTimeStamp ASC
+                            LIMIT 1
+                        )
+                    END AS CreatedBy
+                "),
+            ])
+            ->join('Project', 'Project.ProjectID', '=', 'ProjectTask.ProjectID')
+            ->join('ProjectStatus', 'ProjectStatus.ProjectID', '=', 'Project.ProjectID')
+            ->where('ProjectTask.IsDelete', false)
+            ->where('Project.IsDelete', false)
+            ->where('ProjectStatus.ProjectStatusCode', '11')
+            ->where('ProjectTask.ProgressBar', 100)
+            ->where('ProjectTask.IsCheck', false);
+
+        if ($request->filled('ProjectID')) {
+            $query->whereIn('ProjectTask.ProjectID', $request->ProjectID);
+        }
+
+        // Access gate and ownership scope.
+        if (!$isAdmin) {
+            $isOwnerAnyProject = ProjectMember::where('UserID', $authUserId)
+                ->where('IsOwner', true)
+                ->where('IsActive', true)
+                ->exists();
+
+            if (!$isOwnerAnyProject) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only admin or project owner can access this endpoint',
+                ], 403);
+            }
+        }
+
+        $query->whereExists(function ($sub) use ($ownerUserIds) {
+            $sub->selectRaw(1)
+                ->from('ProjectMember as pm')
+                ->whereColumn('pm.ProjectID', 'ProjectTask.ProjectID')
+                ->whereIn('pm.UserID', $ownerUserIds)
+                ->where('pm.IsOwner', true)
+                ->where('pm.IsActive', true);
+        });
+
+        if ($request->filled('StartDate') || $request->filled('EndDate')) {
+            if ($request->filled('StartDate')) {
+                $query->whereDate('ProjectTask.EndDate', '>=', $request->StartDate);
+            }
+
+            if ($request->filled('EndDate')) {
+                $query->whereDate('ProjectTask.StartDate', '<=', $request->EndDate);
+            }
+        }
+
+        // Keep parity with byTasks query filters if client sends IsCheck.
+        if ($request->has('IsCheck')) {
+            $query->where('ProjectTask.IsCheck', $request->IsCheck);
+        }
+
+        $tasks = $query
+            ->orderBy('ProjectTask.StartDate', 'ASC')
+            ->orderBy('ProjectTask.AtTimeStamp', 'DESC')
+            ->paginate($perPage, ['*'], 'page', $page);
+
+        return response()->json([
+            'success' => true,
             'data'    => $tasks,
         ]);
     }

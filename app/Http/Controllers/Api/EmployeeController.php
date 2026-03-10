@@ -1519,6 +1519,123 @@ class EmployeeController extends Controller
     }
 
     /**
+     * Unresign employee
+     */
+    public function unresign(Request $request, $id)
+    {
+        $employee = Employee::with('user.loginCheck')->find($id);
+
+        if (!$employee) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Employee not found'
+            ], 404);
+        }
+
+        if (!$employee->isResigned()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Employee is not resigned'
+            ], 400);
+        }
+
+        DB::beginTransaction();
+
+        try {
+            $timestamp = Carbon::now()->timestamp;
+            $authUserId = $request->auth_user_id;
+
+            $lastPosition = EmployeePosition::where('EmployeeID', $id)
+                ->whereNotNull('EndDate')
+                ->where('IsDelete', false)
+                ->orderByDesc('EndDate')
+                ->orderByDesc('AtTimeStamp')
+                ->first();
+
+            if (!$lastPosition) {
+                DB::rollBack();
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Last employee position not found'
+                ], 404);
+            }
+
+            $oldResignDate = $employee->ResignDate;
+            $oldPositionEndDate = $lastPosition->EndDate;
+
+            $employee->update([
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+                'ResignDate' => null,
+                'IsDelete' => false
+            ]);
+
+            $lastPosition->update([
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+                'EndDate' => null,
+                'IsActive' => true,
+                'IsDelete' => false,
+            ]);
+
+            if ($employee->user && $employee->user->loginCheck) {
+                $employee->user->loginCheck->update([
+                    'UserStatusCode' => '10',
+                    'LastLoginAttemptCounter' => 0,
+                ]);
+            }
+
+            AuditLog::create([
+                'AuditLogID' => Carbon::now()->timestamp . random_numbersu(5),
+                'AtTimeStamp' => $timestamp,
+                'ByUserID' => $authUserId,
+                'OperationCode' => 'U',
+                'ReferenceTable' => 'Employee',
+                'ReferenceRecordID' => $employee->EmployeeID,
+                'Data' => json_encode([
+                    'Action' => 'Unresign',
+                    'EmployeeID' => $employee->EmployeeID,
+                    'OldResignDate' => $oldResignDate,
+                    'NewResignDate' => null,
+                    'UserStatusCode' => '10',
+                    'EmployeePositionID' => $lastPosition->EmployeePositionID,
+                    'OldEndDate' => $oldPositionEndDate,
+                    'NewEndDate' => null,
+                ]),
+                'Note' => 'Employee unresigned'
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Employee unresigned successfully',
+                'data' => [
+                    'EmployeeID' => $employee->EmployeeID,
+                    'ResignDate' => $employee->ResignDate,
+                    'UserStatusCode' => $employee->user->loginCheck->UserStatusCode ?? null,
+                    'EmployeePosition' => [
+                        'EmployeePositionID' => $lastPosition->EmployeePositionID,
+                        'EndDate' => $lastPosition->EndDate,
+                        'IsActive' => $lastPosition->IsActive,
+                    ],
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to unresign employee',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Soft delete employee
      */
     public function destroy(Request $request, $id)

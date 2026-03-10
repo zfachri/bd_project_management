@@ -23,7 +23,11 @@ class UserController extends Controller
         $perPage = $request->input('per_page', 15);
         $search = $request->input('search');
 
-        $query = User::with('loginCheck');
+        $query = User::with([
+            'loginCheck',
+            'employee.organization',
+            'employee.currentPosition.position',
+        ]);
 
         if ($search) {
             $query->where(function($q) use ($search) {
@@ -36,12 +40,16 @@ class UserController extends Controller
         $users = $query->paginate($perPage);
 
         $users->getCollection()->transform(function($user) {
+            $employeeInfo = $this->buildEmployeeInfo($user);
+
             return [
                 'UserID' => $user->UserID,
                 'FullName' => $user->FullName,
                 'Email' => $user->Email,
                 'IsAdministrator' => $user->IsAdministrator,
                 'UTCCode' => $user->UTCCode,
+                'IsEmployee' => $employeeInfo['IsEmployee'],
+                'Employee' => $employeeInfo['Employee'],
                 'Status' => [
                     'code' => $user->loginCheck->UserStatusCode ?? null,
                     'label' => $this->getStatusLabel($user->loginCheck->UserStatusCode ?? null),
@@ -65,7 +73,11 @@ class UserController extends Controller
      */
     public function show($id)
     {
-        $user = User::with('loginCheck')->find($id);
+        $user = User::with([
+            'loginCheck',
+            'employee.organization',
+            'employee.currentPosition.position',
+        ])->find($id);
 
         if (!$user) {
             return response()->json([
@@ -73,6 +85,8 @@ class UserController extends Controller
                 'message' => 'User not found'
             ], 404);
         }
+
+        $employeeInfo = $this->buildEmployeeInfo($user);
 
         return response()->json([
             'success' => true,
@@ -83,6 +97,8 @@ class UserController extends Controller
                 'Email' => $user->Email,
                 'IsAdministrator' => $user->IsAdministrator,
                 'UTCCode' => $user->UTCCode,
+                'IsEmployee' => $employeeInfo['IsEmployee'],
+                'Employee' => $employeeInfo['Employee'],
                 'Status' => [
                     'Code' => $user->loginCheck->UserStatusCode ?? null,
                     'Label' => $this->getStatusLabel($user->loginCheck->UserStatusCode ?? null),
@@ -591,5 +607,44 @@ class UserController extends Controller
         ];
 
         return $statuses[$code] ?? 'Unknown';
+    }
+
+    private function buildEmployeeInfo(User $user): array
+    {
+        $employee = $user->employee;
+        $isEmployee = !is_null($employee);
+
+        if (!$isEmployee) {
+            return [
+                'IsEmployee' => false,
+                'Employee' => null,
+            ];
+        }
+
+        $organization = $employee->organization;
+        $currentPosition = $employee->currentPosition;
+        $position = $currentPosition?->position;
+
+        return [
+            'IsEmployee' => true,
+            'Employee' => [
+                'EmployeeID' => $employee->EmployeeID,
+                'IsActive' => !$employee->IsDelete,
+                'Organization' => [
+                    'OrganizationID' => $organization?->OrganizationID,
+                    'OrganizationName' => $organization?->OrganizationName,
+                    'IsActive' => $organization
+                        ? ((bool) $organization->IsActive && !$organization->IsDelete)
+                        : null,
+                ],
+                'Position' => [
+                    'PositionID' => $position?->PositionID,
+                    'PositionName' => $position?->PositionName,
+                    'Status' => $currentPosition
+                        ? ($currentPosition->IsActive ? 'Active' : 'Inactive')
+                        : null,
+                ],
+            ],
+        ];
     }
 }

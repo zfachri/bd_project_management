@@ -124,6 +124,7 @@ Route::middleware(['jwt.auth'])->group(function () {
         // Route::middleware('permission:Employee.edit')->group(function () {
         Route::put('/{id}', [EmployeeController::class, 'update']);
         Route::patch('/{id}/resign', [EmployeeController::class, 'resign']);
+        Route::patch('/{id}/unresign', [EmployeeController::class, 'unresign']);
         Route::patch('/{id}/change-position', [EmployeeController::class, 'changePosition']);
         Route::post('/{id}/positions', [EmployeeController::class, 'addPosition']);
         Route::put('/{id}/positions/{positionId}', [EmployeeController::class, 'updatePosition']);
@@ -284,8 +285,11 @@ Route::middleware(['jwt.auth'])->group(function () {
         // PROJECT
         // ========================
         Route::get('/', [ProjectController::class, 'index']);          // List projects
+        Route::get('/summary', [ProjectController::class, 'summary']); // Summary projects by status
         Route::post('/', [ProjectController::class, 'store']);         // Create project
         Route::get('myTasks', [ProjectController::class, 'byTasks']);
+        Route::get('owner-check-tasks', [ProjectController::class, 'ownerCheckTasks']);
+        Route::get('owner-checked-projects', [ProjectController::class, 'ownerCheckedProjects']);
         Route::get('byExpenses', [ProjectController::class, 'listAllExpense']);
         Route::get('for-task-filter', [ProjectFilterController::class, 'index']);
 
