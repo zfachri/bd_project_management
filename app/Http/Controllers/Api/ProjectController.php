@@ -1452,9 +1452,6 @@ class ProjectController extends Controller
             $authUserId = $request->auth_user_id;
             $isAdmin    = (bool) ($authUser->IsAdministrator ?? false);
 
-            $startDate = $request->input('StartDate', Carbon::today()->format('Y-m-d'));
-            $endDate   = $request->input('EndDate', Carbon::today()->format('Y-m-d'));
-
             $query = Project::query()
                 ->where('Project.IsDelete', false)
                 ->leftJoin('ProjectStatus', 'ProjectStatus.ProjectID', '=', 'Project.ProjectID');
@@ -1469,10 +1466,24 @@ class ProjectController extends Controller
             }
 
             // Keep date filter behavior aligned with index().
-            $query->where(function ($q) use ($startDate, $endDate) {
-                $q->whereDate('Project.StartDate', '<=', $startDate)
-                    ->whereDate('Project.EndDate', '>=', $endDate);
-            });
+            if ($request->filled('StartDate') && $request->filled('EndDate')) {
+                $query->where(function ($q) use ($request) {
+                    $q->whereDate('Project.StartDate', '<=', $request->StartDate)
+                        ->whereDate('Project.EndDate', '>=', $request->EndDate);
+                });
+            } elseif ($request->filled('EndDate') && !$request->filled('StartDate')) {
+                $endDate = $request->EndDate;
+                $query->where(function ($q) use ($endDate) {
+                    $q->where(function ($qDateScope) use ($endDate) {
+                        $qDateScope->whereDate('Project.StartDate', '<=', $endDate)
+                            ->whereDate('Project.EndDate', '>=', $endDate);
+                    })->orWhere(function ($qOnProgressOverdue) use ($endDate) {
+                        $qOnProgressOverdue->whereDate('Project.StartDate', '<=', $endDate)
+                            ->whereDate('Project.EndDate', '<', $endDate)
+                            ->where('ProjectStatus.ProjectStatusCode', '11');
+                    });
+                });
+            }
 
             $statusCounts = $query
                 ->selectRaw('ProjectStatus.ProjectStatusCode')
