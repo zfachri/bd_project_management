@@ -34,6 +34,7 @@ return [
     |
     */
     'access_token_expire' => env('JWT_ACCESS_TOKEN_EXPIRE', 3600),
+    'temp_token_expire' => env('JWT_TEMP_TOKEN_EXPIRE', 600),
 
     /*
     |--------------------------------------------------------------------------

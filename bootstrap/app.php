@@ -6,6 +6,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\JWTMiddleware;
 use App\Http\Middleware\CheckPermission;
 use App\Http\Middleware\OrganizationAccessMiddleware;
+use App\Http\Middleware\ForcePasswordChangeMiddleware;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -17,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'jwt.auth' => JWTMiddleware::class,
+            'force.password.change' => ForcePasswordChangeMiddleware::class,
             'permission' => CheckPermission::class,
             'org.access' => OrganizationAccessMiddleware::class,
         ]);

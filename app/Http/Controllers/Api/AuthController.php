@@ -128,13 +128,62 @@ class AuthController extends Controller
 
         // Check if user must change password
         if ($loginCheck->IsChangePassword) {
+            $permissions = [];
+            $context = [];
+
+            if (!$user->IsAdministrator) {
+                $employee = Employee::active()
+                    ->with([
+                        'organization',
+                        'currentPosition.position',
+                        'employeeRole.role.permissions.module'
+                    ])
+                    ->where('EmployeeID', $user->UserID)
+                    ->first();
+
+                if (!$employee) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Employee record not found'
+                    ], 403);
+                }
+
+                $context = [
+                    'EmployeeID'     => $employee->EmployeeID,
+                    'OrganizationID' => $employee->OrganizationID,
+                    'PositionID'     => optional($employee->currentPosition)->PositionID,
+                    'RoleID'         => optional($employee->employeeRole)->RoleID,
+                ];
+
+                $permissions = $employee->getPermissions();
+            }
+
+            $accessToken = JWTHelper::generateAccessToken(
+                $user->UserID,
+                $user->Email,
+                $user->IsAdministrator,
+                $context
+            );
+            $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Password change required',
                 'data' => [
-                    'UserID' => (string) $user->UserID,
+                    'user' => [
+                        'UserID' => (string) $user->UserID,
+                        'FullName' => $user->FullName,
+                        'Email' => $user->Email,
+                        'IsAdministrator' => $user->IsAdministrator,
+                        'UTCCode' => $user->UTCCode
+                    ],
+                    'permissions' => $permissions,
                     'Status' => 'password_change_required',
-                    'RequiresPasswordChange' => true
+                    'RequiresPasswordChange' => true,
+                    'access_token' => $accessToken,
+                    'refresh_token' => $refreshToken,
+                    'token_type' => 'Bearer',
+                    'expires_in' => config('jwt.temp_token_expire', 600)
                 ]
             ], 200);
         }
@@ -266,18 +315,7 @@ class AuthController extends Controller
             'LastLoginAttemptCounter' => 0
         ]);
 
-        // Check if user must change password after OTP verification
-        if ($loginCheck->IsChangePassword) {
-            return response()->json([
-                'success' => true,
-                'message' => 'OTP verified. Password change required.',
-                'data' => [
-                    'UserID' => (string) $user->UserID,
-                    'Status' => 'password_change_required',
-                    'RequiresPasswordChange' => true
-                ]
-            ], 200);
-        }
+        $requiresPasswordChange = (bool) $loginCheck->IsChangePassword;
 
         // Log successful login
         $this->logLogin($user->UserID, true, $request);
@@ -301,7 +339,9 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'OTP verified successfully',
+            'message' => $requiresPasswordChange
+                ? 'OTP verified. Please change password before continuing.'
+                : 'OTP verified successfully',
             'data' => [
                 'user' => [
                     'UserID' => $user->UserID,
@@ -311,6 +351,8 @@ class AuthController extends Controller
                     'UTCCode' => $user->UTCCode
                 ],
                 'permissions' => $permissions,
+                'Status' => $requiresPasswordChange ? 'password_change_required' : 'authenticated',
+                'RequiresPasswordChange' => $requiresPasswordChange,
                 'access_token' => $accessToken,
                 'refresh_token' => $refreshToken,
                 'token_type' => 'Bearer',
@@ -407,22 +449,6 @@ class AuthController extends Controller
             'Note' => 'User changed password'
         ]);
 
-        // Generate new tokens with updated credentials
-        $accessToken = JWTHelper::generateAccessToken(
-            $user->UserID,
-            $user->Email,
-            $user->IsAdministrator
-        );
-        $refreshToken = JWTHelper::generateRefreshToken($user->UserID, $user->Email);
-
-        // Get employee permissions
-        $employee = Employee::where('EmployeeID', $user->UserID)->first();
-        $permissions = [];
-
-        if ($employee) {
-            $permissions = $this->permissionService->getEmployeePermissions($employee->EmployeeID);
-        }
-
         return response()->json([
             'success' => true,
             'message' => 'Password changed successfully',
@@ -434,11 +460,8 @@ class AuthController extends Controller
                     'IsAdministrator' => $user->IsAdministrator,
                     'UTCCode' => $user->UTCCode
                 ],
-                'permissions' => $permissions,
-                'access_token' => $accessToken,
-                'refresh_token' => $refreshToken,
-                'token_type' => 'Bearer',
-                'expires_in' => config('jwt.access_token_expire', 3600)
+                'Status' => 'password_updated',
+                'RequiresPasswordChange' => false,
             ]
         ], 200);
     }

@@ -33,7 +33,7 @@ Route::prefix('auth')->group(function () {
 });
 
 // Protected routes (authentication required)
-Route::middleware(['jwt.auth'])->group(function () {
+Route::middleware(['jwt.auth', 'force.password.change'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
 
