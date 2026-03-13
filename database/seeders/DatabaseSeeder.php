@@ -34,6 +34,7 @@ class DatabaseSeeder extends Seeder
 
             // 6. Employee Position data (depends on: Employee, Position, Organization)
             EmployeePositionSeeder::class,
+            RoleSeeder::class,
         ]);
 
         $this->command->info('✅ All seeders completed successfully!');
