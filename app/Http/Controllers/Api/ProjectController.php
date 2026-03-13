@@ -3093,6 +3093,12 @@ class ProjectController extends Controller
                 && (bool) $filteredInput['IsCheck'] === false
                 && $oldProgressBar >= 100
             );
+            $sendApprovedNotificationToAssignee = (
+                $access['role'] === 'OWNER'
+                && array_key_exists('IsCheck', $filteredInput)
+                && (bool) $filteredInput['IsCheck'] === true
+                && (bool) ($oldData['IsCheck'] ?? false) === false
+            );
             $isProjectReadyToComplete = $this->isProjectReadyToComplete($projectId);
             $sendProjectReadyNotificationToOwner = (
                 !$wasProjectReadyToComplete
@@ -3128,6 +3134,27 @@ class ProjectController extends Controller
                         $task->fresh()->TaskDescription,
                         $assigneeUserIds,
                         'rejected'
+                    );
+                }
+            }
+
+            if ($sendApprovedNotificationToAssignee) {
+                $assigneeUserIds = ProjectAssignMember::query()
+                    ->join('ProjectMember', 'ProjectMember.ProjectMemberID', '=', 'ProjectAssignMember.ProjectMemberID')
+                    ->where('ProjectAssignMember.ProjectTaskID', $taskId)
+                    ->pluck('ProjectMember.UserID')
+                    ->map(static fn($id) => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                if (!empty($assigneeUserIds)) {
+                    $this->sendAssigneeNotification(
+                        Project::find($projectId),
+                        $taskId,
+                        $task->fresh()->TaskDescription,
+                        $assigneeUserIds,
+                        'approved'
                     );
                 }
             }
@@ -5882,6 +5909,10 @@ class ProjectController extends Controller
             $subject = 'Task Ditolak Owner';
             $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" ditolak owner. Silakan update progress kembali.";
             $fieldName = 'Task Rejected';
+        } elseif ($type === 'approved') {
+            $subject = 'Task Disetujui Owner';
+            $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" telah disetujui owner.";
+            $fieldName = 'Task Approved';
         } else {
             $subject = 'Anda Mendapat Task Baru';
             $body = "Anda ditugaskan pada task #{$taskId} ({$taskDescription}) di project \"{$project->ProjectName}\".";

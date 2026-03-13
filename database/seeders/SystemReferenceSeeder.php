@@ -114,6 +114,21 @@ class SystemReferenceSeeder extends Seeder
             ],
             [
                 'ReferenceName' => 'Project',
+                'FieldName' => 'Task Approved',
+                'FieldValue' => $this->buildHtmlTemplate(
+                    'Task Disetujui Owner',
+                    '<p>Dengan hormat,</p>
+                    <p>Task berikut telah disetujui oleh owner:</p>
+                    <ul>
+                        <li>Project: <strong>{{project_name}}</strong> ({{project_id}})</li>
+                        <li>Task ID: <strong>{{task_id}}</strong></li>
+                        <li>Deskripsi Task: <strong>{{task_description}}</strong></li>
+                    </ul>
+                    <p>Terima kasih atas penyelesaian task yang telah dilakukan.</p>'
+                ),
+            ],
+            [
+                'ReferenceName' => 'Project',
                 'FieldName' => 'Task Approval Needed',
                 'FieldValue' => $this->buildHtmlTemplate(
                     'Permintaan Approval Task',
