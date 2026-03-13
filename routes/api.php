@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\ProjectFilterController;
 use App\Http\Controllers\Api\AuditLogController;
+use App\Http\Controllers\Api\SystemReferenceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -331,5 +332,13 @@ Route::middleware(['jwt.auth'])->group(function () {
     Route::prefix('audit-logs')->group(function () {
         Route::get('/', [AuditLogController::class, 'index']);
         Route::get('/{auditLogId}', [AuditLogController::class, 'show']);
+    });
+
+    Route::prefix('system-references')->group(function () {
+        Route::get('/', [SystemReferenceController::class, 'index']);
+        Route::get('/{id}', [SystemReferenceController::class, 'show']);
+        Route::post('/', [SystemReferenceController::class, 'store']);
+        Route::put('/{id}', [SystemReferenceController::class, 'update']);
+        Route::delete('/{id}', [SystemReferenceController::class, 'destroy']);
     });
 });

@@ -1804,6 +1804,9 @@ class ProjectController extends Controller
             ], 422);
         }
 
+        $statusCodeToNotify = null;
+        $statusReasonToNotify = null;
+
         DB::beginTransaction();
         try {
             $authUserId = $request->auth_user_id;
@@ -1935,8 +1938,11 @@ class ProjectController extends Controller
 
             // Update Project Status if provided
             if ($request->has('ProjectStatusCode')) {
+                $requestedStatusCode = (string) $request->ProjectStatusCode;
+                $isStatusChanged = $currentStatusCode !== $requestedStatusCode;
+
                 ProjectStatus::where('ProjectID', $projectId)->update([
-                    'ProjectStatusCode' => $request->ProjectStatusCode,
+                    'ProjectStatusCode' => $requestedStatusCode,
                     'ProjectStatusReason' => $request->ProjectStatusReason ?? null,
                 ]);
 
@@ -1962,6 +1968,11 @@ class ProjectController extends Controller
                             'OperationCode' => 'U',
                         ]);
                 }
+
+                if ($isStatusChanged && in_array($requestedStatusCode, ['00', '12', '99'], true)) {
+                    $statusCodeToNotify = $requestedStatusCode;
+                    $statusReasonToNotify = $request->ProjectStatusReason;
+                }
             }
 
             // Create Audit Log
@@ -1980,6 +1991,15 @@ class ProjectController extends Controller
             ]);
 
             DB::commit();
+
+            if ($statusCodeToNotify !== null) {
+                $this->sendProjectStatusChangedNotification(
+                    $project,
+                    $statusCodeToNotify,
+                    $statusReasonToNotify
+                );
+            }
+
             $projectData = $project->fresh(['status'])->toArray();
             if (!empty($uploadResult)) {
                 $projectData['file_upload'] = $uploadResult;
@@ -2017,6 +2037,8 @@ class ProjectController extends Controller
                 'errors' => $validator->errors(),
             ], 422);
         }
+
+        $shouldNotifyCompleted = false;
 
         DB::beginTransaction();
         try {
@@ -2071,6 +2093,9 @@ class ProjectController extends Controller
                 ], 422);
             }
 
+            $currentStatusCode = ProjectStatus::where('ProjectID', $projectId)->value('ProjectStatusCode');
+            $shouldNotifyCompleted = $currentStatusCode !== '99';
+
             ProjectStatus::where('ProjectID', $projectId)->update([
                 'ProjectStatusCode' => '99',
                 'ProjectStatusReason' => $request->ProjectStatusReason ?? 'Project completed',
@@ -2092,6 +2117,14 @@ class ProjectController extends Controller
             ]);
 
             DB::commit();
+
+            if ($shouldNotifyCompleted) {
+                $this->sendProjectStatusChangedNotification(
+                    $project,
+                    '99',
+                    $request->ProjectStatusReason ?? 'Project completed'
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -2123,6 +2156,8 @@ class ProjectController extends Controller
                 'errors' => $validator->errors()
             ], 422);
         }
+
+        $shouldNotifyVoid = false;
 
         DB::beginTransaction();
         try {
@@ -2163,6 +2198,8 @@ class ProjectController extends Controller
             }
 
             $oldData = $project->toArray();
+            $currentStatusCode = ProjectStatus::where('ProjectID', $projectId)->value('ProjectStatusCode');
+            $shouldNotifyVoid = $currentStatusCode !== '00';
 
             // Soft delete project
             $project->update([
@@ -2191,6 +2228,14 @@ class ProjectController extends Controller
             ]);
 
             DB::commit();
+
+            if ($shouldNotifyVoid) {
+                $this->sendProjectStatusChangedNotification(
+                    $project,
+                    '00',
+                    'Project deleted'
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -5493,6 +5538,40 @@ class ProjectController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    private function sendProjectStatusChangedNotification(?Project $project, string $statusCode, ?string $reason = null): void
+    {
+        if (!$project || !in_array($statusCode, ['00', '12', '99'], true)) {
+            return;
+        }
+
+        $memberIds = ProjectMember::where('ProjectID', $project->ProjectID)
+            ->where('IsActive', true)
+            ->pluck('UserID')
+            ->map(static fn($id) => (int) $id)
+            ->all();
+
+        $emails = $this->resolveEmailsFromUserOrEmployeeIds($memberIds);
+        if (empty($emails)) {
+            return;
+        }
+
+        $statusName = ProjectStatus::nameFromCode($statusCode) ?? $statusCode;
+
+        $subject = match ($statusCode) {
+            '00' => 'Project Dibatalkan',
+            '12' => 'Project Di-hold',
+            '99' => 'Project Selesai',
+            default => 'Perubahan Status Project',
+        };
+
+        $body = "Status project \"{$project->ProjectName}\" berubah menjadi {$statusName}.";
+        if (!empty($reason)) {
+            $body .= " Alasan: {$reason}";
+        }
+
+        $this->sendSimpleEmail($emails, $subject, $body);
     }
 
     private function sendProjectCreatedNotifications(Project $project, array $memberIds): void
