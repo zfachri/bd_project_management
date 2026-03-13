@@ -6,10 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\LoginCheck;
 use App\Models\AuditLog;
+use App\Models\SystemReference;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 
@@ -138,7 +141,7 @@ class UserController extends Controller
             $salt = Str::uuid()->toString();
 
             // Create user with IsAdministrator = 1
-            $defaultPassword = "000000".$salt;
+            $defaultPassword = random_string(6).$salt;
             $user = User::create([
                 'UserID' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
@@ -177,6 +180,8 @@ class UserController extends Controller
                 ]),
                 'Note' => 'New administrator user created'
             ]);
+
+            $this->sendNewUserCredentialEmail($user, $defaultPassword);
 
             return response()->json([
                 'success' => true,
@@ -608,6 +613,82 @@ class UserController extends Controller
         ];
 
         return $statuses[$code] ?? 'Unknown';
+    }
+
+    private function sendNewUserCredentialEmail(User $user, string $plainPassword): void
+    {
+        if (empty($user->Email)) {
+            return;
+        }
+
+        $subject = 'Informasi Akun Pengguna Baru';
+        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $fallbackBody = "Dengan hormat,\n\n"
+            . "Akun Anda telah berhasil dibuat.\n"
+            . "UserID: {$user->UserID}\n"
+            . "Password: {$plainPassword}\n"
+            . "Link Login: {$siteName}\n\n"
+            . "Mohon segera login dan ubah password Anda.\n\n"
+            . "Terima kasih.";
+
+        $template = $this->getSystemReferenceValue('User', 'Add User');
+        if (!empty($template)) {
+            $html = strtr($template, [
+                '{{app_name}}' => (string) config('app.name', 'System'),
+                '{{year}}' => (string) date('Y'),
+                '{{full_name}}' => (string) ($user->FullName ?? '-'),
+                '{{user_id}}' => (string) $user->UserID,
+                '{{password}}' => $plainPassword,
+                '{{site_name}}' => $siteName,
+            ]);
+
+            try {
+                Mail::html($html, function ($message) use ($user, $subject) {
+                    $message->to($user->Email)->subject($subject);
+                });
+                return;
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send new user HTML email', [
+                    'email' => $user->Email,
+                    'user_id' => $user->UserID,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        try {
+            Mail::raw($fallbackBody, function ($message) use ($user, $subject) {
+                $message->to($user->Email)->subject($subject);
+            });
+        } catch (\Throwable $e) {
+            Log::warning('Failed to send new user credential email', [
+                'email' => $user->Email,
+                'user_id' => $user->UserID,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function getSystemReferenceValue(string $referenceName, string $fieldName, ?string $default = null): ?string
+    {
+        try {
+            $value = SystemReference::where('ReferenceName', $referenceName)
+                ->where('FieldName', $fieldName)
+                ->value('FieldValue');
+
+            if (!is_string($value) || trim($value) === '') {
+                return $default;
+            }
+
+            return $value;
+        } catch (\Throwable $e) {
+            Log::warning('Failed to resolve system reference value', [
+                'reference_name' => $referenceName,
+                'field_name' => $fieldName,
+                'error' => $e->getMessage(),
+            ]);
+            return $default;
+        }
     }
 
     private function buildEmployeeInfo(User $user): array
