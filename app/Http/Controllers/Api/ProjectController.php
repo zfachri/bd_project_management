@@ -5577,6 +5577,149 @@ class ProjectController extends Controller
         }
     }
 
+    /**
+     * Send due date reminder emails for tasks.
+     * Reminder schedule: D-30, D-15, D-7, D-3, D-2, D-1, H0
+     * Recipient: project owner + task assignees (active members only).
+     *
+     * Intended to be called by scheduler/cron (admin only).
+     */
+    public function sendDueDateReminders(Request $request)
+    {
+        $authUser = $request->auth_user;
+        if (!$authUser || !(bool) ($authUser->IsAdministrator ?? false)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only administrator can trigger due date reminders',
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'RunDate' => 'nullable|date_format:Y-m-d',
+            'ProjectID' => 'nullable|array',
+            'ProjectID.*' => 'integer',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $baseDate = $request->filled('RunDate')
+            ? Carbon::createFromFormat('Y-m-d', $request->RunDate)->startOfDay()
+            : Carbon::now()->startOfDay();
+
+        $reminderDays = [30, 15, 7, 3, 2, 1, 0];
+        $maxReminderDay = max($reminderDays);
+
+        $taskQuery = ProjectTask::query()
+            ->join('Project', 'Project.ProjectID', '=', 'ProjectTask.ProjectID')
+            ->join('ProjectStatus', 'ProjectStatus.ProjectID', '=', 'Project.ProjectID')
+            ->select([
+                'ProjectTask.ProjectTaskID',
+                'ProjectTask.ProjectID',
+                'ProjectTask.TaskDescription',
+                'ProjectTask.EndDate',
+                'Project.ProjectName',
+            ])
+            ->where('ProjectTask.IsDelete', false)
+            ->where('Project.IsDelete', false)
+            ->whereIn('ProjectStatus.ProjectStatusCode', ['10', '11', '12'])
+            ->where('ProjectTask.ProgressBar', '<', 100)
+            ->whereDate('ProjectTask.EndDate', '>=', $baseDate->copy()->format('Y-m-d'))
+            ->whereDate('ProjectTask.EndDate', '<=', $baseDate->copy()->addDays($maxReminderDay)->format('Y-m-d'));
+
+        if ($request->filled('ProjectID')) {
+            $taskQuery->whereIn('ProjectTask.ProjectID', $request->ProjectID);
+        }
+
+        $tasks = $taskQuery->get();
+
+        $totalEmailsSent = 0;
+        $totalTasksMatched = 0;
+        $taskResults = [];
+
+        foreach ($tasks as $task) {
+            $dueDate = Carbon::parse($task->EndDate)->startOfDay();
+            $daysLeft = $baseDate->diffInDays($dueDate, false);
+
+            if (!in_array($daysLeft, $reminderDays, true)) {
+                continue;
+            }
+
+            $ownerUserId = ProjectMember::where('ProjectID', $task->ProjectID)
+                ->where('IsOwner', true)
+                ->where('IsActive', true)
+                ->value('UserID');
+
+            $assigneeUserIds = ProjectAssignMember::query()
+                ->join('ProjectMember as pm', 'pm.ProjectMemberID', '=', 'ProjectAssignMember.ProjectMemberID')
+                ->where('ProjectAssignMember.ProjectTaskID', $task->ProjectTaskID)
+                ->where('pm.IsActive', true)
+                ->pluck('pm.UserID')
+                ->map(static fn($id) => (int) $id)
+                ->all();
+
+            $recipientIds = array_values(array_unique(array_filter(array_merge(
+                $ownerUserId ? [(int) $ownerUserId] : [],
+                $assigneeUserIds
+            ))));
+
+            $emails = $this->resolveEmailsFromUserOrEmployeeIds($recipientIds);
+            if (empty($emails)) {
+                continue;
+            }
+
+            $dayLabel = $daysLeft === 0 ? 'H0' : ('D-' . $daysLeft);
+            $dueDateFormatted = $dueDate->format('Y-m-d');
+
+            $subject = "Reminder Due Date Task {$dayLabel}";
+            $body = "Pengingat due date task #{$task->ProjectTaskID} ({$task->TaskDescription}) "
+                . "pada project \"{$task->ProjectName}\" jatuh pada {$dueDateFormatted} ({$dayLabel}).";
+
+            $this->sendTemplatedEmail(
+                $emails,
+                $subject,
+                $body,
+                'Project',
+                'Task Due Date Reminder',
+                [
+                    'project_id' => (string) $task->ProjectID,
+                    'project_name' => (string) $task->ProjectName,
+                    'task_id' => (string) $task->ProjectTaskID,
+                    'task_description' => (string) $task->TaskDescription,
+                    'due_date' => $dueDateFormatted,
+                    'days_left' => (string) $daysLeft,
+                    'reminder_day' => $dayLabel,
+                ]
+            );
+
+            $totalTasksMatched++;
+            $totalEmailsSent += count($emails);
+            $taskResults[] = [
+                'ProjectID' => $task->ProjectID,
+                'ProjectTaskID' => $task->ProjectTaskID,
+                'ReminderDay' => $dayLabel,
+                'RecipientCount' => count($emails),
+            ];
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Due date reminders processed',
+            'data' => [
+                'RunDate' => $baseDate->format('Y-m-d'),
+                'ReminderDays' => $reminderDays,
+                'TotalTasksMatched' => $totalTasksMatched,
+                'TotalEmailsSent' => $totalEmailsSent,
+                'Items' => $taskResults,
+            ],
+        ], 200);
+    }
+
     private function sendProjectStatusChangedNotification(?Project $project, string $statusCode, ?string $reason = null): void
     {
         if (!$project || !in_array($statusCode, ['00', '12', '99'], true)) {

@@ -128,6 +128,23 @@ class SystemReferenceSeeder extends Seeder
             ],
             [
                 'ReferenceName' => 'Project',
+                'FieldName' => 'Task Due Date Reminder',
+                'FieldValue' => $this->buildHtmlTemplate(
+                    'Reminder Due Date Task',
+                    '<p>Dengan hormat,</p>
+                    <p>Ini adalah pengingat due date task pada project:</p>
+                    <ul>
+                        <li>Project: <strong>{{project_name}}</strong> ({{project_id}})</li>
+                        <li>Task ID: <strong>{{task_id}}</strong></li>
+                        <li>Deskripsi Task: <strong>{{task_description}}</strong></li>
+                        <li>Due Date: <strong>{{due_date}}</strong></li>
+                        <li>Reminder: <strong>{{reminder_day}}</strong></li>
+                    </ul>
+                    <p>Mohon tindak lanjut penyelesaian task sesuai jadwal.</p>'
+                ),
+            ],
+            [
+                'ReferenceName' => 'Project',
                 'FieldName' => 'Add Member',
                 'FieldValue' => $this->buildHtmlTemplate(
                     'Pemberitahuan Keanggotaan Project',

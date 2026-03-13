@@ -299,6 +299,7 @@ Route::middleware(['jwt.auth', 'force.password.change'])->group(function () {
         Route::put('{projectId}/complete', [ProjectController::class, 'completeProject']); // Complete project
         Route::post('{projectId}/delete', [ProjectController::class, 'destroy']); // Soft delete
         Route::get('{projectId}/files', [ProjectController::class, 'projectFiles']); // Get project files
+        Route::post('reminders/due-date', [ProjectController::class, 'sendDueDateReminders']); // Trigger due date reminders (admin)
 
         // ========================
         // PROJECT MEMBERS
