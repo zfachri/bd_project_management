@@ -20,6 +20,7 @@ use App\Models\ProjectExpense;
 use App\Models\ProjectExpenseFile;
 use App\Models\ProjectAssignMember;
 use App\Models\User;
+use App\Models\SystemReference;
 use App\Services\MinioService;
 use App\Models\AuditLog;
 use App\Models\MiniGoal;
@@ -2270,11 +2271,15 @@ class ProjectController extends Controller
             ], 422);
         }
 
+        $projectForNotification = null;
+        $memberUserIdForNotification = null;
+
         DB::beginTransaction();
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+            $projectForNotification = Project::where('ProjectID', $projectId)->first();
 
             if ($this->isProjectVoid($projectId)) {
                 return response()->json([
@@ -2339,6 +2344,8 @@ class ProjectController extends Controller
                 $action = 'added';
             }
 
+            $memberUserIdForNotification = (int) $member->UserID;
+
             // Update project status
             $this->updateProjectStatus($projectId);
 
@@ -2360,6 +2367,13 @@ class ProjectController extends Controller
             ]);
 
             DB::commit();
+
+            if ($projectForNotification && $memberUserIdForNotification !== null) {
+                $this->sendMemberAddedToProjectNotification(
+                    $projectForNotification,
+                    $memberUserIdForNotification
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -2395,11 +2409,16 @@ class ProjectController extends Controller
             ], 422);
         }
 
+        $projectForNotification = null;
+        $removedMemberUserId = null;
+        $shouldNotifyRemovedMember = false;
+
         DB::beginTransaction();
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
             $user = $request->auth_user;
+            $projectForNotification = Project::where('ProjectID', $projectId)->first();
 
             if ($this->isProjectVoid($projectId)) {
                 return response()->json([
@@ -2482,6 +2501,17 @@ class ProjectController extends Controller
             }
 
             $member->update($updateData);
+            $freshMember = $member->fresh();
+
+            $shouldNotifyRemovedMember = (
+                $request->has('IsActive')
+                && $request->IsActive === false
+                && (bool) ($oldData['IsActive'] ?? false) === true
+                && (bool) ($freshMember->IsActive ?? true) === false
+            );
+            if ($shouldNotifyRemovedMember) {
+                $removedMemberUserId = (int) $member->UserID;
+            }
 
             // Update project status
             $this->updateProjectStatus($projectId);
@@ -2496,17 +2526,24 @@ class ProjectController extends Controller
                 'ReferenceRecordID' => $memberId,
                 'Data' => json_encode([
                     'old' => $oldData,
-                    'new' => $member->fresh()->toArray(),
+                    'new' => $freshMember->toArray(),
                 ]),
                 'Note' => $request->Reasons ?? 'Project member updated'
             ]);
 
             DB::commit();
 
+            if ($shouldNotifyRemovedMember && $projectForNotification && $removedMemberUserId !== null) {
+                $this->sendMemberRemovedFromProjectNotification(
+                    $projectForNotification,
+                    $removedMemberUserId
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Member updated successfully',
-                'data' => $member->fresh(),
+                'data' => $freshMember,
             ], 200);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -5571,7 +5608,83 @@ class ProjectController extends Controller
             $body .= " Alasan: {$reason}";
         }
 
-        $this->sendSimpleEmail($emails, $subject, $body);
+        $this->sendTemplatedEmail(
+            $emails,
+            $subject,
+            $body,
+            'Project',
+            'Update Project Status',
+            [
+                'project_id' => (string) $project->ProjectID,
+                'project_name' => (string) $project->ProjectName,
+                'status_code' => (string) $statusCode,
+                'status_name' => (string) $statusName,
+                'reason' => (string) ($reason ?? '-'),
+            ]
+        );
+    }
+
+    private function sendMemberAddedToProjectNotification(?Project $project, int $memberUserId): void
+    {
+        if (!$project) {
+            return;
+        }
+
+        $emails = $this->resolveEmailsFromUserOrEmployeeIds([$memberUserId]);
+        if (empty($emails)) {
+            return;
+        }
+
+        $subject = 'Pemberitahuan Keanggotaan Project';
+        $body = "Dengan hormat,\n\n"
+            . "Kami informasikan bahwa Anda telah terdaftar sebagai anggota pada project "
+            . "\"{$project->ProjectName}\" (Project ID: {$project->ProjectID}).\n\n"
+            . "Mohon menindaklanjuti penugasan sesuai kebutuhan project.\n\n"
+            . "Terima kasih.";
+
+        $this->sendTemplatedEmail(
+            $emails,
+            $subject,
+            $body,
+            'Project',
+            'Add Member',
+            [
+                'project_id' => (string) $project->ProjectID,
+                'project_name' => (string) $project->ProjectName,
+            ]
+        );
+    }
+
+    private function sendMemberRemovedFromProjectNotification(?Project $project, int $memberUserId): void
+    {
+        if (!$project) {
+            return;
+        }
+
+        $emails = $this->resolveEmailsFromUserOrEmployeeIds([$memberUserId]);
+        if (empty($emails)) {
+            return;
+        }
+
+        $subject = 'Pemberitahuan Perubahan Keanggotaan Project';
+        $body = "Dengan hormat,\n\n"
+            . "Kami informasikan bahwa keanggotaan Anda pada project "
+            . "\"{$project->ProjectName}\" telah dinonaktifkan.\n"
+            . "Project ID: {$project->ProjectID}.\n\n"
+            . "Apabila diperlukan klarifikasi lebih lanjut, silakan menghubungi owner project terkait.\n\n"
+            . "Terima kasih.";
+
+        $this->sendTemplatedEmail(
+            $emails,
+            $subject,
+            $body,
+            'Project',
+            'Remove Member',
+            [
+                'project_id' => (string) $project->ProjectID,
+                'project_name' => (string) $project->ProjectName,
+            ]
+        );
     }
 
     private function sendProjectCreatedNotifications(Project $project, array $memberIds): void
@@ -5583,7 +5696,17 @@ class ProjectController extends Controller
 
         $subject = 'Project Baru Dibuat';
         $body = "Project \"{$project->ProjectName}\" sudah dibuat dan Anda terdaftar sebagai member.";
-        $this->sendSimpleEmail($emails, $subject, $body);
+        $this->sendTemplatedEmail(
+            $emails,
+            $subject,
+            $body,
+            'Project',
+            'Add Project',
+            [
+                'project_id' => (string) $project->ProjectID,
+                'project_name' => (string) $project->ProjectName,
+            ]
+        );
     }
 
     private function sendAssigneeNotification(
@@ -5605,12 +5728,26 @@ class ProjectController extends Controller
         if ($type === 'rejected') {
             $subject = 'Task Ditolak Owner';
             $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" ditolak owner. Silakan update progress kembali.";
+            $fieldName = 'Task Rejected';
         } else {
             $subject = 'Anda Mendapat Task Baru';
             $body = "Anda ditugaskan pada task #{$taskId} ({$taskDescription}) di project \"{$project->ProjectName}\".";
+            $fieldName = 'Add Task Assignment';
         }
 
-        $this->sendSimpleEmail($emails, $subject, $body);
+        $this->sendTemplatedEmail(
+            $emails,
+            $subject,
+            $body,
+            'Project',
+            $fieldName,
+            [
+                'project_id' => (string) $project->ProjectID,
+                'project_name' => (string) $project->ProjectName,
+                'task_id' => (string) $taskId,
+                'task_description' => (string) $taskDescription,
+            ]
+        );
     }
 
     private function sendOwnerApprovalNotification(?Project $project, $taskId, string $taskDescription): void
@@ -5635,7 +5772,19 @@ class ProjectController extends Controller
 
         $subject = 'Approval Task Diperlukan';
         $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" sudah mencapai 100% dan menunggu pengecekan Anda.";
-        $this->sendSimpleEmail($emails, $subject, $body);
+        $this->sendTemplatedEmail(
+            $emails,
+            $subject,
+            $body,
+            'Project',
+            'Task Approval Needed',
+            [
+                'project_id' => (string) $project->ProjectID,
+                'project_name' => (string) $project->ProjectName,
+                'task_id' => (string) $taskId,
+                'task_description' => (string) $taskDescription,
+            ]
+        );
     }
 
     private function resolveEmailsFromUserOrEmployeeIds(array $ids): array
@@ -5685,6 +5834,76 @@ class ProjectController extends Controller
                 });
             } catch (\Throwable $e) {
                 Log::warning('Failed to send project email notification', [
+                    'email' => $email,
+                    'subject' => $subject,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function sendTemplatedEmail(
+        array $emails,
+        string $subject,
+        string $fallbackTextBody,
+        string $referenceName,
+        string $fieldName,
+        array $replacements = []
+    ): void {
+        $templateHtml = $this->resolveHtmlTemplate($referenceName, $fieldName, $replacements);
+        if (!empty($templateHtml)) {
+            $this->sendHtmlEmail($emails, $subject, $templateHtml);
+            return;
+        }
+
+        // Keep old text email for fallback / rollback scenario.
+        $this->sendSimpleEmail($emails, $subject, $fallbackTextBody);
+    }
+
+    private function resolveHtmlTemplate(string $referenceName, string $fieldName, array $replacements = []): ?string
+    {
+        try {
+            $template = SystemReference::where('ReferenceName', $referenceName)
+                ->where('FieldName', $fieldName)
+                ->value('FieldValue');
+
+            if (!is_string($template) || trim($template) === '') {
+                return null;
+            }
+
+            $baseReplacements = [
+                'app_name' => (string) config('app.name', 'System'),
+                'year' => (string) date('Y'),
+                'reference_name' => $referenceName,
+                'field_name' => $fieldName,
+            ];
+
+            $merged = array_merge($baseReplacements, $replacements);
+            $pairs = [];
+            foreach ($merged as $key => $value) {
+                $pairs['{{' . $key . '}}'] = (string) $value;
+            }
+
+            return strtr($template, $pairs);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to resolve project email template from SystemReference', [
+                'reference_name' => $referenceName,
+                'field_name' => $fieldName,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    private function sendHtmlEmail(array $emails, string $subject, string $htmlBody): void
+    {
+        foreach ($emails as $email) {
+            try {
+                Mail::html($htmlBody, function ($message) use ($email, $subject) {
+                    $message->to($email)->subject($subject);
+                });
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send project HTML email notification', [
                     'email' => $email,
                     'subject' => $subject,
                     'error' => $e->getMessage(),

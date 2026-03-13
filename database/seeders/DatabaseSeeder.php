@@ -20,7 +20,7 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             // UserSeeder::class,
-            // SystemReferenceSeeder::class,
+            SystemReferenceSeeder::class,
             // OrganizationSeeder::class,
             // PositionLevelSeeder::class,
             // 3. Position data (depends on: Organization, PositionLevel)
