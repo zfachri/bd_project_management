@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -121,5 +122,23 @@ class DocumentManagement extends Model
     public function scopeRaciType($query)
     {
         return $query->where('DocumentType', 'RACI');
+    }
+
+    /**
+     * Generate DocumentManagementID with format: YYYYMMDD + 4-digit sequence.
+     * Example: 202603130001, 202603130002, ...
+     */
+    public static function generateDailyDocumentManagementId(?Carbon $date = null): int
+    {
+        $targetDate = ($date ?? Carbon::now())->startOfDay();
+        $prefix = (int) $targetDate->format('Ymd');
+        $base = $prefix * 10000;
+
+        $maxId = self::query()
+            ->whereBetween('DocumentManagementID', [$base, $base + 9999])
+            ->lockForUpdate()
+            ->max('DocumentManagementID');
+
+        return $maxId ? ((int) $maxId + 1) : ($base + 1);
     }
 }

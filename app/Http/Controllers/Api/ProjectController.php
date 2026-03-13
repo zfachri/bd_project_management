@@ -2852,6 +2852,7 @@ class ProjectController extends Controller
 
             $oldData = $task->toArray();
             $oldProgressBar = (float) $task->ProgressBar;
+            $wasProjectReadyToComplete = $this->isProjectReadyToComplete($projectId);
             $oldAssignedUserIds = ProjectAssignMember::query()
                 ->join('ProjectMember', 'ProjectMember.ProjectMemberID', '=', 'ProjectAssignMember.ProjectMemberID')
                 ->where('ProjectAssignMember.ProjectTaskID', $taskId)
@@ -3092,6 +3093,11 @@ class ProjectController extends Controller
                 && (bool) $filteredInput['IsCheck'] === false
                 && $oldProgressBar >= 100
             );
+            $isProjectReadyToComplete = $this->isProjectReadyToComplete($projectId);
+            $sendProjectReadyNotificationToOwner = (
+                !$wasProjectReadyToComplete
+                && $isProjectReadyToComplete
+            );
 
             DB::commit();
 
@@ -3132,6 +3138,10 @@ class ProjectController extends Controller
                     $taskId,
                     $task->fresh()->TaskDescription
                 );
+            }
+
+            if ($sendProjectReadyNotificationToOwner) {
+                $this->sendProjectReadyToCompleteNotification(Project::find($projectId));
             }
 
             return response()->json([
@@ -5926,6 +5936,64 @@ class ProjectController extends Controller
                 'project_name' => (string) $project->ProjectName,
                 'task_id' => (string) $taskId,
                 'task_description' => (string) $taskDescription,
+            ]
+        );
+    }
+
+    private function isProjectReadyToComplete($projectId): bool
+    {
+        $activeTaskCount = ProjectTask::where('ProjectID', $projectId)
+            ->where('IsDelete', false)
+            ->count();
+
+        if ($activeTaskCount === 0) {
+            return false;
+        }
+
+        $remaining = ProjectTask::where('ProjectID', $projectId)
+            ->where('IsDelete', false)
+            ->where(function ($q) {
+                $q->where('ProgressBar', '<', 100)
+                    ->orWhere('IsCheck', false);
+            })
+            ->count();
+
+        return $remaining === 0;
+    }
+
+    private function sendProjectReadyToCompleteNotification(?Project $project): void
+    {
+        if (!$project) {
+            return;
+        }
+
+        $ownerUserId = ProjectMember::where('ProjectID', $project->ProjectID)
+            ->where('IsOwner', true)
+            ->where('IsActive', true)
+            ->value('UserID');
+
+        if (!$ownerUserId) {
+            return;
+        }
+
+        $emails = $this->resolveEmailsFromUserOrEmployeeIds([(int) $ownerUserId]);
+        if (empty($emails)) {
+            return;
+        }
+
+        $subject = 'Project Siap Diselesaikan';
+        $body = "Project \"{$project->ProjectName}\" (ID: {$project->ProjectID}) sudah siap untuk diselesaikan. "
+            . "Semua task aktif telah mencapai 100% dan sudah terverifikasi (IsCheck).";
+
+        $this->sendTemplatedEmail(
+            $emails,
+            $subject,
+            $body,
+            'Project',
+            'Project Ready To Complete',
+            [
+                'project_id' => (string) $project->ProjectID,
+                'project_name' => (string) $project->ProjectName,
             ]
         );
     }

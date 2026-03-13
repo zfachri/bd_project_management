@@ -38,14 +38,9 @@ class DocumentManagementController extends Controller
             'organization_id' => 'required|integer|exists:Organization,OrganizationID',
 
             // File upload info
-            'filename' => 'required|string|max:255',
-            'content_type' => 'required|string|max:100',
+            'filename' => 'required|string|max:255|regex:/\\.pdf$/i',
+            'content_type' => 'required|string|in:application/pdf',
             'file_size' => 'nullable|integer|min:1',
-
-            // Converted PDF (if original is not PDF)
-            'has_converted_pdf' => 'nullable|boolean',
-            'converted_filename' => 'nullable|required_if:has_converted_pdf,true|string|max:255',
-            'converted_file_size' => 'nullable|integer|min:1',
 
             // RACI Activities (only if DocumentType = 'RACI')
             'raci_activities' => 'nullable|array',
@@ -68,13 +63,19 @@ class DocumentManagementController extends Controller
             ], 422);
         }
 
+        if ($request->boolean('has_converted_pdf') || $request->filled('converted_filename')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only PDF file type is allowed',
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
             $authUserId = $request->auth_user_id;
             // $authUserId = $request->user()->UserID ?? $request->user()->id;
             $timestamp = Carbon::now()->timestamp;
             $documentType = $request->input('document_type');
-            $hasConvertedPdf = $request->input('has_converted_pdf', false);
 
             // Validate RACI activities only required if DocumentType = 'RACI'
             if ($documentType === 'RACI' && !$request->has('raci_activities')) {
@@ -83,7 +84,7 @@ class DocumentManagementController extends Controller
 
             // Create DocumentManagement
             $document = DocumentManagement::create([
-                'DocumentManagementID' => Carbon::now()->timestamp . random_numbersu(5),
+                'DocumentManagementID' => DocumentManagement::generateDailyDocumentManagementId(),
                 'AtTimeStamp' => $timestamp,
                 'ByUserID' => $authUserId,
                 'OperationCode' => 'I',
@@ -96,100 +97,39 @@ class DocumentManagementController extends Controller
                 'IsActive' => true,
             ]);
 
-            // ========================================
-            // CASE 1: PDF Upload (No conversion needed)
-            // ========================================
-            if (!$hasConvertedPdf) {
-                // Generate presigned URL for PDF
-                $originalResult = $this->minioService->generatePresignedUploadUrl(
-                    moduleName: 'DocumentManagement',
-                    moduleNameId: (string) $document->DocumentManagementID,
-                    filename: $request->input('filename'),
-                    contentType: $request->input('content_type'),
-                    fileSize: $request->input('file_size', 0)
-                );
+            // PDF only upload
+            $originalResult = $this->minioService->generatePresignedUploadUrl(
+                moduleName: 'DocumentManagement',
+                moduleNameId: (string) $document->DocumentManagementID,
+                filename: $request->input('filename'),
+                contentType: $request->input('content_type'),
+                fileSize: $request->input('file_size', 0)
+            );
 
-                $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
-                    . '/' . config('filesystems.disks.minio.bucket')
-                    . '/' . $originalResult['file_info']['path'];
+            $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                . '/' . config('filesystems.disks.minio.bucket')
+                . '/' . $originalResult['file_info']['path'];
 
-                // Create DocumentVersion (PDF only)
-                DocumentVersion::create([
-                    'DocumentManagementID' => $document->DocumentManagementID,
-                    'VersionNo' => 1,
-                    'DocumentPath' => $originalResult['file_info']['path'], // PDF for display
-                    'DocumentUrl' => $pdfStaticUrl,
-                    'DocumentOriginalPath' => null, // No original (already PDF)
-                    'DocumentOriginalUrl' => null,
-                    'AtTimeStamp' => $timestamp,
-                ]);
+            DocumentVersion::create([
+                'DocumentManagementID' => $document->DocumentManagementID,
+                'VersionNo' => 1,
+                'DocumentPath' => $originalResult['file_info']['path'],
+                'DocumentUrl' => $pdfStaticUrl,
+                'DocumentOriginalPath' => null,
+                'DocumentOriginalUrl' => null,
+                'AtTimeStamp' => $timestamp,
+            ]);
 
-                $responseData = [
-                    'document_id' => $document->DocumentManagementID,
-                    'document_name' => $document->DocumentName,
-                    'document_type' => $document->DocumentType,
-                    'version_no' => 1,
-                    'upload_url' => $originalResult['upload_url'],
-                    'file_path' => $originalResult['file_info']['path'],
-                    'filename' => $originalResult['file_info']['filename'],
-                    'expires_in' => $originalResult['expires_in'],
-                ];
-            }  // ========================================
-            // CASE 2: Non-PDF Upload (Needs conversion)
-            // ========================================
-            else {
-                // Generate presigned URL for ORIGINAL file (DOCX, XLSX, etc)
-                $originalResult = $this->minioService->generatePresignedUploadUrl(
-                    moduleName: 'DocumentManagement',
-                    moduleNameId: (string) $document->DocumentManagementID,
-                    filename: $request->input('filename'),
-                    contentType: $request->input('content_type'),
-                    fileSize: $request->input('file_size', 0)
-                );
-
-                $originalStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
-                    . '/' . config('filesystems.disks.minio.bucket')
-                    . '/' . $originalResult['file_info']['path'];
-
-                // Generate presigned URL for CONVERTED PDF
-                $convertedResult = $this->minioService->generatePresignedUploadUrl(
-                    moduleName: 'DocumentManagement',
-                    moduleNameId: (string) $document->DocumentManagementID,
-                    filename: $request->input('converted_filename'),
-                    contentType: 'application/pdf',
-                    fileSize: $request->input('converted_file_size', 0)
-                );
-
-                $convertedStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
-                    . '/' . config('filesystems.disks.minio.bucket')
-                    . '/' . $convertedResult['file_info']['path'];
-
-                // Create DocumentVersion (PDF + Original)
-                DocumentVersion::create([
-                    'DocumentManagementID' => $document->DocumentManagementID,
-                    'VersionNo' => 1,
-                    'DocumentPath' => $convertedResult['file_info']['path'], // Converted PDF (for display)
-                    'DocumentUrl' => $convertedStaticUrl,
-                    'DocumentOriginalPath' => $originalResult['file_info']['path'], // Original file (for download)
-                    'DocumentOriginalUrl' => $originalStaticUrl,
-                    'AtTimeStamp' => $timestamp,
-                ]);
-
-                $responseData = [
-                    'document_id' => $document->DocumentManagementID,
-                    'document_name' => $document->DocumentName,
-                    'document_type' => $document->DocumentType,
-                    'version_no' => 1,
-                    'upload_url' => $convertedResult['upload_url'],
-                    'file_path' => $convertedResult['file_info']['path'],
-                    'filename' => $convertedResult['file_info']['filename'],
-                    'expires_in' => $convertedResult['expires_in'],
-                    'original_upload_url' => $originalResult['upload_url'],
-                    'original_file_path' => $originalResult['file_info']['path'],
-                    'original_filename' => $originalResult['file_info']['filename'],
-                    'original_expires_in' => $originalResult['expires_in'],
-                ];
-            }
+            $responseData = [
+                'document_id' => $document->DocumentManagementID,
+                'document_name' => $document->DocumentName,
+                'document_type' => $document->DocumentType,
+                'version_no' => 1,
+                'upload_url' => $originalResult['upload_url'],
+                'file_path' => $originalResult['file_info']['path'],
+                'filename' => $originalResult['file_info']['filename'],
+                'expires_in' => $originalResult['expires_in'],
+            ];
 
             // // Generate presigned URL for version 1
             // $result = $this->minioService->generatePresignedUploadUrl(
@@ -269,9 +209,9 @@ class DocumentManagementController extends Controller
                     'DocumentType' => $document->DocumentType,
                     'OrganizationID' => $document->OrganizationID,
                     'VersionNo' => 1,
-                    'HasConvertedPDF' => $hasConvertedPdf,
-                    'DocumentPath' => !$hasConvertedPdf ? $originalResult['file_info']['path'] : $convertedResult['file_info']['path'],
-                    'DocumentOriginalPath' =>   $originalResult['file_info']['path'],
+                    'HasConvertedPDF' => false,
+                    'DocumentPath' => $originalResult['file_info']['path'],
+                    'DocumentOriginalPath' => null,
                     'AccessOrganizations' => array_merge(
                         [$document->OrganizationID],
                         $request->input('access_organization_ids', [])
@@ -304,15 +244,10 @@ class DocumentManagementController extends Controller
     public function updateDocument(Request $request, $documentId)
     {
         $validator = Validator::make($request->all(), [
-            'filename' => 'required|string|max:255',
-            'content_type' => 'required|string|max:100',
+            'filename' => 'required|string|max:255|regex:/\\.pdf$/i',
+            'content_type' => 'required|string|in:application/pdf',
             'file_size' => 'nullable|integer|min:1',
             'notes' => 'nullable|string',
-
-            // Converted PDF (if original is not PDF)
-            'has_converted_pdf' => 'nullable|boolean',
-            'converted_filename' => 'nullable|required_if:has_converted_pdf,true|string|max:255',
-            'converted_file_size' => 'nullable|integer|min:1',
         ]);
 
         if ($validator->fails()) {
@@ -323,13 +258,19 @@ class DocumentManagementController extends Controller
             ], 422);
         }
 
+        if ($request->boolean('has_converted_pdf') || $request->filled('converted_filename')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only PDF file type is allowed',
+            ], 422);
+        }
+
         DB::beginTransaction();
 
         try {
             $authUserId = $request->auth_user_id;
             // $authUserId = $request->user()->UserID ?? $request->user()->id;
             $timestamp = Carbon::now()->timestamp;
-            $hasConvertedPdf = $request->input('has_converted_pdf', false);
 
             // Check if document exists
             $document = DocumentManagement::active()->findOrFail($documentId);
@@ -338,101 +279,38 @@ class DocumentManagementController extends Controller
             $currentVersion = $document->LatestVersionNo ?? 1;
             $newVersionNo = $currentVersion + 1;
 
-            // ========================================
-            // CASE 1: PDF Upload (No conversion needed)
-            // ========================================
-            if (!$hasConvertedPdf) {
-                $originalResult = $this->minioService->generatePresignedUploadUrl(
-                    moduleName: 'DocumentManagement',
-                    moduleNameId: (string) $documentId,
-                    filename: $request->input('filename'),
-                    contentType: $request->input('content_type'),
-                    fileSize: $request->input('file_size', 0)
-                );
+            $originalResult = $this->minioService->generatePresignedUploadUrl(
+                moduleName: 'DocumentManagement',
+                moduleNameId: (string) $documentId,
+                filename: $request->input('filename'),
+                contentType: $request->input('content_type'),
+                fileSize: $request->input('file_size', 0)
+            );
 
-                $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
-                    . '/' . config('filesystems.disks.minio.bucket')
-                    . '/' . $originalResult['file_info']['path'];
+            $pdfStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
+                . '/' . config('filesystems.disks.minio.bucket')
+                . '/' . $originalResult['file_info']['path'];
 
-                // Create new DocumentVersion (PDF only)
-                DocumentVersion::create([
-                    'DocumentManagementID' => $documentId,
-                    'VersionNo' => $newVersionNo,
-                    'DocumentPath' => $originalResult['file_info']['path'],
-                    'DocumentUrl' => $pdfStaticUrl,
-                    'DocumentOriginalPath' => null,
-                    'DocumentOriginalUrl' => null,
-                    'AtTimeStamp' => $timestamp,
-                ]);
+            DocumentVersion::create([
+                'DocumentManagementID' => $documentId,
+                'VersionNo' => $newVersionNo,
+                'DocumentPath' => $originalResult['file_info']['path'],
+                'DocumentUrl' => $pdfStaticUrl,
+                'DocumentOriginalPath' => null,
+                'DocumentOriginalUrl' => null,
+                'AtTimeStamp' => $timestamp,
+            ]);
 
-                $responseData = [
-                    'document_id' => $documentId,
-                    'document_name' => $document->DocumentName,
-                    'previous_version' => $currentVersion,
-                    'current_version' => $newVersionNo,
-                    'upload_url' => $originalResult['upload_url'],
-                    'file_path' => $originalResult['file_info']['path'],
-                    'filename' => $originalResult['file_info']['filename'],
-                    'expires_in' => $originalResult['expires_in'],
-                ];
-            }
-            // ========================================
-            // CASE 2: Non-PDF Upload (Needs conversion)
-            // ========================================
-            else {
-                // Generate presigned URL for ORIGINAL file
-                $originalResult = $this->minioService->generatePresignedUploadUrl(
-                    moduleName: 'DocumentManagement',
-                    moduleNameId: (string) $documentId,
-                    filename: $request->input('filename'),
-                    contentType: $request->input('content_type'),
-                    fileSize: $request->input('file_size', 0)
-                );
-
-                $originalStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
-                    . '/' . config('filesystems.disks.minio.bucket')
-                    . '/' . $originalResult['file_info']['path'];
-
-                // Generate presigned URL for CONVERTED PDF
-                $convertedResult = $this->minioService->generatePresignedUploadUrl(
-                    moduleName: 'DocumentManagement',
-                    moduleNameId: (string) $documentId,
-                    filename: $request->input('converted_filename'),
-                    contentType: 'application/pdf',
-                    fileSize: $request->input('converted_file_size', 0)
-                );
-
-                $convertedStaticUrl = rtrim(config('filesystems.disks.minio.endpoint'), '/')
-                    . '/' . config('filesystems.disks.minio.bucket')
-                    . '/' . $convertedResult['file_info']['path'];
-
-                // Create new DocumentVersion (PDF + Original)
-                DocumentVersion::create([
-                    'DocumentManagementID' => $documentId,
-                    'VersionNo' => $newVersionNo,
-                    'DocumentPath' => $convertedResult['file_info']['path'], // PDF for display
-                    'DocumentUrl' => $convertedStaticUrl,
-                    'DocumentOriginalPath' => $originalResult['file_info']['path'], // Original for download
-                    'DocumentOriginalUrl' => $originalStaticUrl,
-                    'AtTimeStamp' => $timestamp,
-                ]);
-
-                $responseData = [
-                    'document_id' => $documentId,
-                    'document_name' => $document->DocumentName,
-                    'previous_version' => $currentVersion,
-                    'current_version' => $newVersionNo,
-                    'upload_url' => $convertedResult['upload_url'],
-                    'file_path' => $convertedResult['file_info']['path'],
-                    'filename' => $convertedResult['file_info']['filename'],
-                    'expires_in' => $convertedResult['expires_in'],
-                    'original_upload_url' => $originalResult['upload_url'],
-                    'original_file_path' => $originalResult['file_info']['path'],
-                    'original_filename' => $originalResult['file_info']['filename'],
-                    'original_expires_in' => $originalResult['expires_in'],
-
-                ];
-            }
+            $responseData = [
+                'document_id' => $documentId,
+                'document_name' => $document->DocumentName,
+                'previous_version' => $currentVersion,
+                'current_version' => $newVersionNo,
+                'upload_url' => $originalResult['upload_url'],
+                'file_path' => $originalResult['file_info']['path'],
+                'filename' => $originalResult['file_info']['filename'],
+                'expires_in' => $originalResult['expires_in'],
+            ];
 
             // // Generate presigned URL for new version
             // $result = $this->minioService->generatePresignedUploadUrl(
@@ -475,9 +353,9 @@ class DocumentManagementController extends Controller
                     'DocumentName' => $document->DocumentName,
                     'PreviousVersionNo' => $currentVersion,
                     'NewVersionNo' => $newVersionNo,
-                    'HasConvertedPDF' => $hasConvertedPdf,
-                    'DocumentPath' => !$hasConvertedPdf ? $originalResult['file_info']['path'] : $convertedResult['file_info']['path'],
-                    'DocumentOriginalPath' =>   $originalResult['file_info']['path'],
+                    'HasConvertedPDF' => false,
+                    'DocumentPath' => $originalResult['file_info']['path'],
+                    'DocumentOriginalPath' => null,
                 ]),
                 'Note' => "Document updated - version {$newVersionNo} created"
             ]);
