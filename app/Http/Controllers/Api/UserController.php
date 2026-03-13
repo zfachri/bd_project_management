@@ -120,7 +120,7 @@ class UserController extends Controller
         $validator = Validator::make($request->all(), [
             'FullName' => 'required|string|max:100',
             'Email' => 'required|email|max:100|unique:User,Email',
-            'Password' => 'required|string|min:6',
+            'Password' => 'nullable|string|min:6',
             'UTCCode' => 'nullable|string|max:6',
         ]);
 
@@ -138,6 +138,7 @@ class UserController extends Controller
             $salt = Str::uuid()->toString();
 
             // Create user with IsAdministrator = 1
+            $defaultPassword = "000000".$salt;
             $user = User::create([
                 'UserID' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
@@ -146,7 +147,7 @@ class UserController extends Controller
                 'IsAdministrator' => true, // Force administrator
                 'FullName' => $request->FullName,
                 'Email' => $request->Email,
-                'Password' => Hash::make($request->Password.$salt),
+                'Password' => Hash::make($defaultPassword),
                 'UTCCode' => $request->utc_code ?? '+07:00',
             ]);
 

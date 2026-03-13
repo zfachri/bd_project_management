@@ -237,6 +237,7 @@ class EmployeeController extends Controller
 
             // Step 2: Create User with EmployeeID as UserID
             $salt = Str::uuid()->toString();
+            $defaultPassword = "000000".$salt;
 
             $user = User::create([
                 'UserID' => $employee->EmployeeID, // UserID = EmployeeID
@@ -246,7 +247,7 @@ class EmployeeController extends Controller
                 'IsAdministrator' => false, // IsAdministrator = 0
                 'FullName' => $request->FullName,
                 'Email' => $request->Email,
-                'Password' => Hash::make($request->Password ?? "000000" . $salt),
+                'Password' => Hash::make($defaultPassword),
                 'UTCCode' => $request->UTCCode ?? '+07:00',
             ]);
 

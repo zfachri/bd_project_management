@@ -4502,6 +4502,19 @@ class ProjectController extends Controller
             ->orderBy('ProjectTask.AtTimeStamp', 'DESC')
             ->paginate($perPage, ['*'], 'page', $page);
 
+        $taskIds = $tasks->getCollection()
+            ->pluck('ProjectTaskID')
+            ->filter()
+            ->values()
+            ->all();
+        $assigneeMap = $this->buildTaskAssigneeMap($taskIds);
+        $tasks->setCollection(
+            $tasks->getCollection()->map(function ($task) use ($assigneeMap) {
+                $task->Assignees = $assigneeMap[$task->ProjectTaskID] ?? [];
+                return $task;
+            })
+        );
+
         return response()->json([
             'success' => true,
             'project' => [
@@ -4577,8 +4590,10 @@ class ProjectController extends Controller
                 "),
             ])
             ->join('Project', 'Project.ProjectID', '=', 'ProjectTask.ProjectID')
+            ->join('ProjectStatus', 'ProjectStatus.ProjectID', '=', 'Project.ProjectID')
             ->where('ProjectTask.IsDelete', false)
-            ->where('Project.IsDelete', false);
+            ->where('Project.IsDelete', false)
+            ->whereIn('ProjectStatus.ProjectStatusCode', ['10', '11']);
 
         // =========================
         // PROJECT FILTER
@@ -4658,11 +4673,57 @@ class ProjectController extends Controller
             ->orderBy('ProjectTask.AtTimeStamp', 'DESC')
             ->paginate($perPage, ['*'], 'page', $page);
 
+        $taskIds = $tasks->getCollection()
+            ->pluck('ProjectTaskID')
+            ->filter()
+            ->values()
+            ->all();
+        $assigneeMap = $this->buildTaskAssigneeMap($taskIds);
+        $tasks->setCollection(
+            $tasks->getCollection()->map(function ($task) use ($assigneeMap) {
+                $task->Assignees = $assigneeMap[$task->ProjectTaskID] ?? [];
+                return $task;
+            })
+        );
+
         return response()->json([
             'success' => true,
             'mode'    => $mode,
             'data'    => $tasks,
         ]);
+    }
+
+    private function buildTaskAssigneeMap(array $taskIds): array
+    {
+        if (empty($taskIds)) {
+            return [];
+        }
+
+        return DB::table('ProjectAssignMember as pam')
+            ->join('ProjectMember as pm', 'pm.ProjectMemberID', '=', 'pam.ProjectMemberID')
+            ->join('User as u', 'u.UserID', '=', 'pm.UserID')
+            ->whereIn('pam.ProjectTaskID', $taskIds)
+            ->where('pm.IsActive', true)
+            ->select([
+                'pam.ProjectTaskID',
+                'u.UserID',
+                'u.FullName',
+            ])
+            ->get()
+            ->groupBy('ProjectTaskID')
+            ->map(function ($rows) {
+                return $rows
+                    ->map(function ($row) {
+                        return [
+                            'UserID' => $row->UserID,
+                            'FullName' => $row->FullName,
+                        ];
+                    })
+                    ->unique('UserID')
+                    ->values()
+                    ->all();
+            })
+            ->toArray();
     }
 
     /**
