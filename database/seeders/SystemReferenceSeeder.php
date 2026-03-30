@@ -63,11 +63,20 @@ class SystemReferenceSeeder extends Seeder
                 'ReferenceName' => 'Project',
                 'FieldName' => 'Add Project',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Pemberitahuan Project Baru',
-                    '<p>Dengan hormat,</p>
-                    <p>Anda telah terdaftar pada project <strong>{{project_name}}</strong>.</p>
-                    <p>Project ID: <strong>{{project_id}}</strong>.</p>
-                    <p>Mohon menindaklanjuti kebutuhan project sesuai peran Anda.</p>'
+                    'Project Successfully Created',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        A new project, <strong style="color:#1f2937;">{{project_name}}</strong>, has been successfully created.
+                        Kindly review the project details for your reference.
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Project -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
@@ -86,15 +95,22 @@ class SystemReferenceSeeder extends Seeder
                 'ReferenceName' => 'Project',
                 'FieldName' => 'Add Task Assignment',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Penugasan Task Baru',
-                    '<p>Dengan hormat,</p>
-                    <p>Anda telah ditugaskan pada task berikut:</p>
-                    <ul>
-                        <li>Project: <strong>{{project_name}}</strong> ({{project_id}})</li>
-                        <li>Task ID: <strong>{{task_id}}</strong></li>
-                        <li>Deskripsi Task: <strong>{{task_description}}</strong></li>
-                    </ul>
-                    <p>Mohon tindak lanjut sesuai target waktu yang ditentukan.</p>'
+                    'New Task Assignment',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        A new task has been assigned within <strong style="color:#1f2937;">{{project_name}}</strong>.
+                        Kindly review the task details and proceed accordingly.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Task -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
@@ -177,29 +193,70 @@ class SystemReferenceSeeder extends Seeder
                 'ReferenceName' => 'Project',
                 'FieldName' => 'Add Member',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Pemberitahuan Keanggotaan Project',
-                    '<p>Dengan hormat,</p>
-                    <p>Kami informasikan bahwa Anda telah terdaftar sebagai anggota pada project <strong>{{project_name}}</strong>.</p>
-                    <p>Project ID: <strong>{{project_id}}</strong>.</p>'
+                    'Project Member Added',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        You have been added to <strong style="color:#1f2937;">{{project_name}}</strong>.
+                        Kindly review the project details and the updated team composition.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Project -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
                 'ReferenceName' => 'Project',
                 'FieldName' => 'Remove Member',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Pemberitahuan Perubahan Keanggotaan',
-                    '<p>Dengan hormat,</p>
-                    <p>Kami informasikan bahwa keanggotaan Anda pada project <strong>{{project_name}}</strong> telah dinonaktifkan.</p>
-                    <p>Project ID: <strong>{{project_id}}</strong>.</p>'
+                    'Project Member Removed',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        You have been removed from <strong style="color:#1f2937;">{{project_name}}</strong>.
+                        You will no longer have access to the project and its associated activities.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Details -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
                 'ReferenceName' => 'Project',
                 'FieldName' => 'Add Expense',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Pencatatan Expense Project',
-                    '<p>Dengan hormat,</p>
-                    <p>Expense project telah ditambahkan pada project <strong>{{project_name}}</strong> ({{project_id}}).</p>'
+                    'Project Add Expense',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        Here is the latest project expense information for
+                        <strong style="color:#1f2937;">{{project_id}} - {{project_name}}</strong>.
+                    </p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        Expense amount:
+                        <strong style="color:#1f2937;">{{expense_currency}} {{expense_amount}}</strong>.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For more details, please click the button below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 18px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">Project Expenses -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
@@ -219,57 +276,132 @@ class SystemReferenceSeeder extends Seeder
                 'ReferenceName' => 'Document',
                 'FieldName' => 'Submission Request',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Permintaan Dokumen Baru',
-                    '<p>Dengan hormat,</p>
-                    <p>Terdapat permintaan submission dokumen baru dari pengguna.</p>
-                    <p>Silakan lakukan peninjauan sesuai prosedur.</p>'
+                    'Document Submission Request',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        There is a document submission request for <strong style="color:#1f2937;">{{document_name}}</strong>.
+                        Kindly review and submit the required document accordingly.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Document -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
                 'ReferenceName' => 'Document',
                 'FieldName' => 'Submission Approved',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Pengajuan Dokumen Disetujui',
-                    '<p>Dengan hormat,</p>
-                    <p>Pengajuan dokumen Anda telah disetujui oleh administrator.</p>'
+                    'Document Submission Approved',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        The submission for <strong style="color:#1f2937;">{{document_name}}</strong> has been approved.
+                        No further action is required at this stage.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Document -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
                 'ReferenceName' => 'Document',
                 'FieldName' => 'Submission Declined',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Pengajuan Dokumen Ditolak',
-                    '<p>Dengan hormat,</p>
-                    <p>Pengajuan dokumen Anda belum dapat disetujui.</p>
-                    <p>Mohon periksa catatan admin untuk tindak lanjut.</p>'
+                    'Document Submission Declined',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        The submission for <strong style="color:#1f2937;">{{document_name}}</strong> has been declined.
+                        Kindly review the feedback provided and resubmit the document.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Details -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
                 'ReferenceName' => 'Document',
                 'FieldName' => 'Revision Request',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Permintaan Revisi Dokumen',
-                    '<p>Dengan hormat,</p>
-                    <p>Terdapat permintaan revisi pada dokumen yang memerlukan peninjauan admin.</p>'
+                    'Document Revision Request',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        There is a document revision request for <strong style="color:#1f2937;">{{document_name}}</strong>.
+                        Kindly review the requested changes and proceed accordingly.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">Review Document Revision -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
                 'ReferenceName' => 'Document',
                 'FieldName' => 'Revision Approved',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Revisi Dokumen Disetujui',
-                    '<p>Dengan hormat,</p>
-                    <p>Permintaan revisi dokumen Anda telah disetujui oleh administrator.</p>'
+                    'Document Revision Approved',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        The document revision request for <strong style="color:#1f2937;">{{document_name}}</strong> has been approved.
+                        You may proceed with the subsequent steps.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Document -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
             [
                 'ReferenceName' => 'Document',
                 'FieldName' => 'Revision Declined',
                 'FieldValue' => $this->buildHtmlTemplate(
-                    'Revisi Dokumen Ditolak',
-                    '<p>Dengan hormat,</p>
-                    <p>Permintaan revisi dokumen Anda belum dapat disetujui.</p>
-                    <p>Mohon periksa catatan admin untuk detail penolakan.</p>'
+                    'Document Revision Declined',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        The document revision request for <strong style="color:#1f2937;">{{document_name}}</strong> has been declined.
+                        Kindly review the provided feedback and take the necessary action.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Details -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
                 ),
             ],
         ];
@@ -310,17 +442,17 @@ class SystemReferenceSeeder extends Seeder
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>' . e($title) . '</title>
 </head>
-<body style="margin:0;padding:0;background:#f4f7fa;font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;">
-    <div style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-        <div style="background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);padding:24px;color:#ffffff;text-align:center;">
-            <h1 style="margin:0;font-size:22px;">' . e($title) . '</h1>
+<body style="margin:0;padding:0;background-color:#f0f1f5;font-family:Arial,Helvetica,sans-serif;">
+    <div style="max-width:600px;margin:20px auto;background:#ffffff;border-radius:14px;padding:20px;box-sizing:border-box;">
+        <div style="background:linear-gradient(90deg,#004aad,#cb6ce6);border-radius:14px;padding:30px 16px;text-align:center;">
+            <h1 style="margin:0;font-size:16px;line-height:1.4;color:#ffffff;font-weight:700;">' . e($title) . '</h1>
         </div>
-        <div style="padding:28px 24px;color:#1f2937;font-size:14px;line-height:1.7;">
+        <div style="padding:20px 0 10px 0;color:#1f2937;font-size:13px;line-height:1.7;">
             ' . $content . '
-            <p style="margin-top:20px;">Terima kasih.</p>
+            <p style="margin:20px 0 0 0;color:#737373;">Thank you.</p>
         </div>
-        <div style="background:#f8fafc;padding:16px 24px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;text-align:center;">
-            <p style="margin:0 0 8px 0;">Email otomatis dari {{app_name}}. Mohon tidak membalas email ini.</p>
+        <div style="padding:14px 0 0 0;border-top:1px solid #eceff4;color:#6b7280;font-size:12px;text-align:center;">
+            <p style="margin:0 0 8px 0;">Automated email from {{app_name}}. Please do not reply to this message.</p>
             <p style="margin:0;">&copy; {{year}} {{app_name}}. All rights reserved.</p>
         </div>
     </div>

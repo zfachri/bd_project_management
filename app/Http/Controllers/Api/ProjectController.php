@@ -3776,6 +3776,7 @@ class ProjectController extends Controller
 
             // Update project status
             $this->updateProjectStatus($projectId);
+            $project = Project::where('ProjectID', $projectId)->first();
 
             // Create Audit Log
             AuditLog::create([
@@ -3796,6 +3797,11 @@ class ProjectController extends Controller
             ]);
 
             DB::commit();
+
+            $this->sendExpenseNotification(
+                $project,
+                $expense
+            );
 
             return response()->json([
                 'success' => true,
@@ -5815,7 +5821,12 @@ class ProjectController extends Controller
             return;
         }
 
-        $subject = 'Pemberitahuan Keanggotaan Project';
+        $recipientName = (string) (User::where('UserID', $memberUserId)->value('FullName') ?: 'Username');
+        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
+            ->where('FieldName', 'Site Name')
+            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+
+        $subject = 'Project Member Added';
         $body = "Dengan hormat,\n\n"
             . "Kami informasikan bahwa Anda telah terdaftar sebagai anggota pada project "
             . "\"{$project->ProjectName}\" (Project ID: {$project->ProjectID}).\n\n"
@@ -5829,8 +5840,10 @@ class ProjectController extends Controller
             'Project',
             'Add Member',
             [
+                'recipient_name' => $recipientName,
                 'project_id' => (string) $project->ProjectID,
                 'project_name' => (string) $project->ProjectName,
+                'site_name' => $siteName,
             ]
         );
     }
@@ -5846,7 +5859,12 @@ class ProjectController extends Controller
             return;
         }
 
-        $subject = 'Pemberitahuan Perubahan Keanggotaan Project';
+        $recipientName = (string) (User::where('UserID', $memberUserId)->value('FullName') ?: 'Username');
+        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
+            ->where('FieldName', 'Site Name')
+            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+
+        $subject = 'Project Member Removed';
         $body = "Dengan hormat,\n\n"
             . "Kami informasikan bahwa keanggotaan Anda pada project "
             . "\"{$project->ProjectName}\" telah dinonaktifkan.\n"
@@ -5861,8 +5879,10 @@ class ProjectController extends Controller
             'Project',
             'Remove Member',
             [
+                'recipient_name' => $recipientName,
                 'project_id' => (string) $project->ProjectID,
                 'project_name' => (string) $project->ProjectName,
+                'site_name' => $siteName,
             ]
         );
     }
@@ -5874,7 +5894,11 @@ class ProjectController extends Controller
             return;
         }
 
-        $subject = 'Project Baru Dibuat';
+        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
+            ->where('FieldName', 'Site Name')
+            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+
+        $subject = 'Project Successfully Created';
         $body = "Project \"{$project->ProjectName}\" sudah dibuat dan Anda terdaftar sebagai member.";
         $this->sendTemplatedEmail(
             $emails,
@@ -5883,8 +5907,52 @@ class ProjectController extends Controller
             'Project',
             'Add Project',
             [
+                'recipient_name' => 'Username',
                 'project_id' => (string) $project->ProjectID,
                 'project_name' => (string) $project->ProjectName,
+                'site_name' => $siteName,
+            ]
+        );
+    }
+
+    private function sendExpenseNotification(?Project $project, ?ProjectExpense $expense): void
+    {
+        if (!$project || !$expense) {
+            return;
+        }
+
+        $memberIds = ProjectMember::where('ProjectID', $project->ProjectID)
+            ->where('IsActive', true)
+            ->pluck('UserID')
+            ->map(static fn($id) => (int) $id)
+            ->all();
+
+        $emails = $this->resolveEmailsFromUserOrEmployeeIds($memberIds);
+        if (empty($emails)) {
+            return;
+        }
+
+        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
+            ->where('FieldName', 'Site Name')
+            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+
+        $subject = 'Project Add Expense';
+        $body = "Expense baru ditambahkan pada project {$project->ProjectName} ({$project->ProjectID}) "
+            . "dengan nilai {$expense->CurrencyCode} {$expense->ExpenseAmount}.";
+
+        $this->sendTemplatedEmail(
+            $emails,
+            $subject,
+            $body,
+            'Project',
+            'Add Expense',
+            [
+                'recipient_name' => 'Project Member',
+                'project_id' => (string) $project->ProjectID,
+                'project_name' => (string) $project->ProjectName,
+                'expense_currency' => (string) $expense->CurrencyCode,
+                'expense_amount' => (string) number_format((float) $expense->ExpenseAmount, 0, ',', '.'),
+                'site_name' => $siteName,
             ]
         );
     }
@@ -5905,6 +5973,10 @@ class ProjectController extends Controller
             return;
         }
 
+        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
+            ->where('FieldName', 'Site Name')
+            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+
         if ($type === 'rejected') {
             $subject = 'Task Ditolak Owner';
             $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" ditolak owner. Silakan update progress kembali.";
@@ -5914,7 +5986,7 @@ class ProjectController extends Controller
             $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" telah disetujui owner.";
             $fieldName = 'Task Approved';
         } else {
-            $subject = 'Anda Mendapat Task Baru';
+            $subject = 'New Task Assignment';
             $body = "Anda ditugaskan pada task #{$taskId} ({$taskDescription}) di project \"{$project->ProjectName}\".";
             $fieldName = 'Add Task Assignment';
         }
@@ -5926,10 +5998,12 @@ class ProjectController extends Controller
             'Project',
             $fieldName,
             [
+                'recipient_name' => 'Username',
                 'project_id' => (string) $project->ProjectID,
                 'project_name' => (string) $project->ProjectName,
                 'task_id' => (string) $taskId,
                 'task_description' => (string) $taskDescription,
+                'site_name' => $siteName,
             ]
         );
     }

@@ -5,9 +5,13 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\DocumentSubmission;
+use App\Models\SystemReference;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 
 class DocumentSubmissionController extends Controller
@@ -65,6 +69,8 @@ class DocumentSubmissionController extends Controller
             ]);
 
             DB::commit();
+
+            $this->sendSubmissionRequestNotification($submission);
 
             return response()->json([
                 'success' => true,
@@ -260,6 +266,8 @@ class DocumentSubmissionController extends Controller
 
             DB::commit();
 
+            $this->sendSubmissionApprovedNotification($submission);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Submission approved successfully',
@@ -341,6 +349,8 @@ class DocumentSubmissionController extends Controller
             ]);
 
             DB::commit();
+
+            $this->sendSubmissionDeclinedNotification($submission);
 
             return response()->json([
                 'success' => true,
@@ -465,6 +475,218 @@ class DocumentSubmissionController extends Controller
                 'message' => 'Failed to retrieve statistics',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    private function sendSubmissionRequestNotification(DocumentSubmission $submission): void
+    {
+        $adminUsers = User::query()
+            ->where('IsAdministrator', true)
+            ->whereNotNull('Email')
+            ->get(['UserID', 'FullName', 'Email']);
+
+        if ($adminUsers->isEmpty()) {
+            return;
+        }
+
+        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $documentName = $this->resolveSubmissionDocumentName($submission);
+        $subject = 'Document Submission Request';
+        $fallbackBody = "There is a document submission request for {$documentName}.";
+
+        foreach ($adminUsers as $admin) {
+            $this->sendTemplatedEmail(
+                [$admin->Email],
+                $subject,
+                $fallbackBody,
+                'Document',
+                'Submission Request',
+                [
+                    'recipient_name' => (string) ($admin->FullName ?: 'Username'),
+                    'document_name' => $documentName,
+                    'submission_id' => (string) $submission->DocumentSubmission,
+                    'site_name' => (string) $siteName,
+                ]
+            );
+        }
+    }
+
+    private function sendSubmissionApprovedNotification(DocumentSubmission $submission): void
+    {
+        $requester = User::find($submission->ByUserID);
+        if (!$requester || empty($requester->Email)) {
+            return;
+        }
+
+        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $documentName = $this->resolveSubmissionDocumentName($submission);
+        $subject = 'Document Submission Approved';
+        $fallbackBody = "The submission for {$documentName} has been approved.";
+
+        $this->sendTemplatedEmail(
+            [$requester->Email],
+            $subject,
+            $fallbackBody,
+            'Document',
+            'Submission Approved',
+            [
+                'recipient_name' => (string) ($requester->FullName ?: 'Username'),
+                'document_name' => $documentName,
+                'submission_id' => (string) $submission->DocumentSubmission,
+                'site_name' => (string) $siteName,
+            ]
+        );
+    }
+
+    private function sendSubmissionDeclinedNotification(DocumentSubmission $submission): void
+    {
+        $requester = User::find($submission->ByUserID);
+        if (!$requester || empty($requester->Email)) {
+            return;
+        }
+
+        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $documentName = $this->resolveSubmissionDocumentName($submission);
+        $subject = 'Document Submission Declined';
+        $fallbackBody = "The submission for {$documentName} has been declined.";
+
+        $this->sendTemplatedEmail(
+            [$requester->Email],
+            $subject,
+            $fallbackBody,
+            'Document',
+            'Submission Declined',
+            [
+                'recipient_name' => (string) ($requester->FullName ?: 'Username'),
+                'document_name' => $documentName,
+                'submission_id' => (string) $submission->DocumentSubmission,
+                'site_name' => (string) $siteName,
+            ]
+        );
+    }
+
+    private function resolveSubmissionDocumentName(DocumentSubmission $submission): string
+    {
+        $comment = trim((string) ($submission->Comment ?? ''));
+        if ($comment !== '') {
+            return strlen($comment) > 80
+                ? (substr($comment, 0, 77) . '...')
+                : $comment;
+        }
+
+        return 'Document Submission';
+    }
+
+    private function getSystemReferenceValue(string $referenceName, string $fieldName, ?string $default = null): ?string
+    {
+        try {
+            $value = SystemReference::where('ReferenceName', $referenceName)
+                ->where('FieldName', $fieldName)
+                ->value('FieldValue');
+
+            if (!is_string($value) || trim($value) === '') {
+                return $default;
+            }
+
+            return $value;
+        } catch (\Throwable $e) {
+            Log::warning('Failed to resolve system reference value for document submission email', [
+                'reference_name' => $referenceName,
+                'field_name' => $fieldName,
+                'error' => $e->getMessage(),
+            ]);
+            return $default;
+        }
+    }
+
+    private function sendTemplatedEmail(
+        array $emails,
+        string $subject,
+        string $fallbackTextBody,
+        string $referenceName,
+        string $fieldName,
+        array $replacements = []
+    ): void {
+        $templateHtml = $this->resolveHtmlTemplate($referenceName, $fieldName, $replacements);
+        if (!empty($templateHtml)) {
+            $this->sendHtmlEmail($emails, $subject, $templateHtml);
+            return;
+        }
+
+        $this->sendSimpleEmail($emails, $subject, $fallbackTextBody);
+    }
+
+    private function resolveHtmlTemplate(string $referenceName, string $fieldName, array $replacements = []): ?string
+    {
+        try {
+            $template = SystemReference::where('ReferenceName', $referenceName)
+                ->where('FieldName', $fieldName)
+                ->value('FieldValue');
+
+            if (!is_string($template) || trim($template) === '') {
+                return null;
+            }
+
+            $baseReplacements = [
+                'app_name' => (string) config('app.name', 'System'),
+                'year' => (string) date('Y'),
+            ];
+
+            $pairs = [];
+            foreach (array_merge($baseReplacements, $replacements) as $key => $value) {
+                $pairs['{{' . $key . '}}'] = (string) $value;
+            }
+
+            return strtr($template, $pairs);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to resolve document submission email template', [
+                'reference_name' => $referenceName,
+                'field_name' => $fieldName,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    private function sendHtmlEmail(array $emails, string $subject, string $htmlBody): void
+    {
+        foreach ($emails as $email) {
+            if (!is_string($email) || trim($email) === '') {
+                continue;
+            }
+
+            try {
+                Mail::html($htmlBody, function ($message) use ($email, $subject) {
+                    $message->to($email)->subject($subject);
+                });
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send document submission HTML email', [
+                    'email' => $email,
+                    'subject' => $subject,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function sendSimpleEmail(array $emails, string $subject, string $body): void
+    {
+        foreach ($emails as $email) {
+            if (!is_string($email) || trim($email) === '') {
+                continue;
+            }
+
+            try {
+                Mail::raw($body, function ($message) use ($email, $subject) {
+                    $message->to($email)->subject($subject);
+                });
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send document submission fallback email', [
+                    'email' => $email,
+                    'subject' => $subject,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

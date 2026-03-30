@@ -8,12 +8,15 @@ use App\Models\DocumentManagement;
 use App\Models\DocumentRevision;
 use App\Models\DocumentRole;
 use App\Models\Employee;
+use App\Models\SystemReference;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 
 class DocumentRevisionController extends Controller
@@ -158,6 +161,8 @@ class DocumentRevisionController extends Controller
 
             DB::commit();
 
+            $this->sendRevisionRequestNotification($document, $revision);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Revision request submitted successfully',
@@ -247,7 +252,7 @@ class DocumentRevisionController extends Controller
 
             DB::commit();
 
-            //kirim email ke pembuat revision bahwa comment revisionnya sudah di accept oleh admin (bersangkutan)
+            $this->sendRevisionApprovedNotification($revision);
 
             return response()->json([
                 'success' => true,
@@ -337,7 +342,7 @@ class DocumentRevisionController extends Controller
             ]);
 
             DB::commit();
-            //kirim email ke pembuat revision bahwa comment revisionnya di decline oleh admin (bersangkutan) dengan alasan : ${alasan}
+            $this->sendRevisionDeclinedNotification($revision);
 
             return response()->json([
                 'success' => true,
@@ -642,6 +647,213 @@ class DocumentRevisionController extends Controller
                 'message' => 'Failed to retrieve approved revisions',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    private function sendRevisionRequestNotification(DocumentManagement $document, DocumentRevision $revision): void
+    {
+        $adminUsers = User::query()
+            ->where('IsAdministrator', true)
+            ->whereNotNull('Email')
+            ->get(['UserID', 'FullName', 'Email']);
+
+        if ($adminUsers->isEmpty()) {
+            return;
+        }
+
+        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $subject = 'Document Revision Request';
+        $fallbackBody = "There is a document revision request for {$document->DocumentName}.";
+
+        foreach ($adminUsers as $admin) {
+            $this->sendTemplatedEmail(
+                [$admin->Email],
+                $subject,
+                $fallbackBody,
+                'Document',
+                'Revision Request',
+                [
+                    'recipient_name' => (string) ($admin->FullName ?: 'Username'),
+                    'document_name' => (string) $document->DocumentName,
+                    'document_id' => (string) $document->DocumentManagementID,
+                    'revision_id' => (string) $revision->DocumentRevisionID,
+                    'site_name' => (string) $siteName,
+                ]
+            );
+        }
+    }
+
+    private function sendRevisionApprovedNotification(DocumentRevision $revision): void
+    {
+        $requester = User::find($revision->ByUserID);
+        $document = DocumentManagement::find($revision->DocumentManagementID);
+
+        if (!$requester || empty($requester->Email) || !$document) {
+            return;
+        }
+
+        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $subject = 'Document Revision Approved';
+        $fallbackBody = "The document revision request for {$document->DocumentName} has been approved.";
+
+        $this->sendTemplatedEmail(
+            [$requester->Email],
+            $subject,
+            $fallbackBody,
+            'Document',
+            'Revision Approved',
+            [
+                'recipient_name' => (string) ($requester->FullName ?: 'Username'),
+                'document_name' => (string) $document->DocumentName,
+                'document_id' => (string) $document->DocumentManagementID,
+                'revision_id' => (string) $revision->DocumentRevisionID,
+                'notes' => (string) ($revision->Notes ?? ''),
+                'site_name' => (string) $siteName,
+            ]
+        );
+    }
+
+    private function sendRevisionDeclinedNotification(DocumentRevision $revision): void
+    {
+        $requester = User::find($revision->ByUserID);
+        $document = DocumentManagement::find($revision->DocumentManagementID);
+
+        if (!$requester || empty($requester->Email) || !$document) {
+            return;
+        }
+
+        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $subject = 'Document Revision Declined';
+        $fallbackBody = "The document revision request for {$document->DocumentName} has been declined.";
+
+        $this->sendTemplatedEmail(
+            [$requester->Email],
+            $subject,
+            $fallbackBody,
+            'Document',
+            'Revision Declined',
+            [
+                'recipient_name' => (string) ($requester->FullName ?: 'Username'),
+                'document_name' => (string) $document->DocumentName,
+                'document_id' => (string) $document->DocumentManagementID,
+                'revision_id' => (string) $revision->DocumentRevisionID,
+                'notes' => (string) ($revision->Notes ?? ''),
+                'site_name' => (string) $siteName,
+            ]
+        );
+    }
+
+    private function getSystemReferenceValue(string $referenceName, string $fieldName, ?string $default = null): ?string
+    {
+        try {
+            $value = SystemReference::where('ReferenceName', $referenceName)
+                ->where('FieldName', $fieldName)
+                ->value('FieldValue');
+
+            if (!is_string($value) || trim($value) === '') {
+                return $default;
+            }
+
+            return $value;
+        } catch (\Throwable $e) {
+            Log::warning('Failed to resolve system reference value for document revision email', [
+                'reference_name' => $referenceName,
+                'field_name' => $fieldName,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $default;
+        }
+    }
+
+    private function sendTemplatedEmail(
+        array $emails,
+        string $subject,
+        string $fallbackTextBody,
+        string $referenceName,
+        string $fieldName,
+        array $replacements = []
+    ): void {
+        $templateHtml = $this->resolveHtmlTemplate($referenceName, $fieldName, $replacements);
+        if (!empty($templateHtml)) {
+            $this->sendHtmlEmail($emails, $subject, $templateHtml);
+            return;
+        }
+
+        $this->sendSimpleEmail($emails, $subject, $fallbackTextBody);
+    }
+
+    private function resolveHtmlTemplate(string $referenceName, string $fieldName, array $replacements = []): ?string
+    {
+        try {
+            $template = SystemReference::where('ReferenceName', $referenceName)
+                ->where('FieldName', $fieldName)
+                ->value('FieldValue');
+
+            if (!is_string($template) || trim($template) === '') {
+                return null;
+            }
+
+            $baseReplacements = [
+                'app_name' => (string) config('app.name', 'System'),
+                'year' => (string) date('Y'),
+            ];
+
+            $pairs = [];
+            foreach (array_merge($baseReplacements, $replacements) as $key => $value) {
+                $pairs['{{' . $key . '}}'] = (string) $value;
+            }
+
+            return strtr($template, $pairs);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to resolve document revision email template', [
+                'reference_name' => $referenceName,
+                'field_name' => $fieldName,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    private function sendHtmlEmail(array $emails, string $subject, string $htmlBody): void
+    {
+        foreach ($emails as $email) {
+            if (!is_string($email) || trim($email) === '') {
+                continue;
+            }
+
+            try {
+                Mail::html($htmlBody, function ($message) use ($email, $subject) {
+                    $message->to($email)->subject($subject);
+                });
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send document revision HTML email', [
+                    'email' => $email,
+                    'subject' => $subject,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function sendSimpleEmail(array $emails, string $subject, string $body): void
+    {
+        foreach ($emails as $email) {
+            if (!is_string($email) || trim($email) === '') {
+                continue;
+            }
+
+            try {
+                Mail::raw($body, function ($message) use ($email, $subject) {
+                    $message->to($email)->subject($subject);
+                });
+            } catch (\Throwable $e) {
+                Log::warning('Failed to send document revision fallback email', [
+                    'email' => $email,
+                    'subject' => $subject,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }
