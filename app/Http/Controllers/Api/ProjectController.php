@@ -4692,9 +4692,11 @@ class ProjectController extends Controller
             ->values()
             ->all();
         $assigneeMap = $this->buildTaskAssigneeMap($taskIds);
+        $taskFileMap = $this->buildTaskFileMap($taskIds);
         $tasks->setCollection(
-            $tasks->getCollection()->map(function ($task) use ($assigneeMap) {
+            $tasks->getCollection()->map(function ($task) use ($assigneeMap, $taskFileMap) {
                 $task->Assignees = $assigneeMap[$task->ProjectTaskID] ?? [];
+                $task->files = $taskFileMap[$task->ProjectTaskID] ?? [];
                 return $task;
             })
         );
@@ -4906,6 +4908,74 @@ class ProjectController extends Controller
                     ->unique('UserID')
                     ->values()
                     ->all();
+            })
+            ->toArray();
+    }
+
+    private function buildTaskFileMap(array $taskIds): array
+    {
+        if (empty($taskIds)) {
+            return [];
+        }
+
+        $files = DB::table('ProjectTaskFile')
+            ->whereIn('ProjectTaskID', $taskIds)
+            ->where('IsDelete', false)
+            ->select([
+                'ProjectTaskFileID',
+                'ProjectTaskID',
+                'OriginalFileName',
+                'DocumentOriginalUrl',
+                'ByUserID',
+                'OperationCode',
+            ])
+            ->get();
+
+        if ($files->isEmpty()) {
+            return [];
+        }
+
+        $fileIdsNeedingInsertByUser = $files
+            ->filter(function ($file) {
+                return (string) ($file->OperationCode ?? '') !== 'I';
+            })
+            ->pluck('ProjectTaskFileID')
+            ->filter()
+            ->values()
+            ->all();
+
+        $insertByUserMap = [];
+        if (!empty($fileIdsNeedingInsertByUser)) {
+            $insertByUserMap = DB::table('AuditLog')
+                ->where('ReferenceTable', 'ProjectTaskFile')
+                ->where('OperationCode', 'I')
+                ->whereIn('ReferenceRecordID', $fileIdsNeedingInsertByUser)
+                ->orderBy('AtTimeStamp', 'asc')
+                ->get(['ReferenceRecordID', 'ByUserID'])
+                ->groupBy('ReferenceRecordID')
+                ->map(function ($rows) {
+                    return $rows->first()->ByUserID ?? null;
+                })
+                ->toArray();
+        }
+
+        return $files
+            ->groupBy('ProjectTaskID')
+            ->map(function ($rows) use ($insertByUserMap) {
+                return $rows->map(function ($file) use ($insertByUserMap) {
+                    $lastEditedId = $file->ByUserID ?? null;
+                    $createdById = (string) ($file->OperationCode ?? '') === 'I'
+                        ? ($file->ByUserID ?? null)
+                        : ($insertByUserMap[$file->ProjectTaskFileID] ?? $file->ByUserID ?? null);
+
+                    return [
+                        'ProjectTaskFileID' => $file->ProjectTaskFileID,
+                        'OriginalFileName' => $file->OriginalFileName,
+                        'DocumentOriginalUrl' => $file->DocumentOriginalUrl,
+                        'CreatedByUserID' => $createdById,
+                        'LastEditedByUserID' => $lastEditedId,
+                    ];
+                })->values()->all();
             })
             ->toArray();
     }
