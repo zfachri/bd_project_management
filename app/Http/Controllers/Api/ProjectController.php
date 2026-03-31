@@ -1694,6 +1694,27 @@ class ProjectController extends Controller
 
             if (!in_array('tasks', $includes)) {
                 unset($data['tasks']);
+            } else {
+                $data['tasks'] = array_map(function ($task) {
+                    $assigneeMap = [];
+
+                    foreach (($task['assignments'] ?? []) as $assignment) {
+                        $user = $assignment['member']['user'] ?? null;
+                        if (!$user || !isset($user['UserID'])) {
+                            continue;
+                        }
+
+                        $assigneeMap[$user['UserID']] = [
+                            'UserID' => $user['UserID'],
+                            'FullName' => $user['FullName'] ?? null,
+                        ];
+                    }
+
+                    $task['Assignees'] = array_values($assigneeMap);
+                    unset($task['assignments']);
+
+                    return $task;
+                }, $data['tasks']);
             }
 
             if (!in_array('expenses', $includes)) {

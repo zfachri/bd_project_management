@@ -50,7 +50,7 @@ class AuthController extends Controller
         $loginType = filter_var($loginField, FILTER_VALIDATE_EMAIL) ? 'Email' : 'UserID';
         $validator = Validator::make($request->all(), [
             'Email' => 'required|string',
-            'Password' => 'required|string|min:6|max:6',
+            'Password' => 'required|string|min:6',
         ]);
 
         if ($validator->fails()) {
@@ -378,8 +378,8 @@ class AuthController extends Controller
     public function changePassword(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'OldPassword' => 'required|string|size:6',
-            'NewPassword' => 'required|string|size:6|confirmed',
+            'OldPassword' => 'required|string|min:6',
+            'NewPassword' => 'required|string|min:6|confirmed',
         ]);
 
         if ($validator->fails()) {
@@ -549,7 +549,7 @@ class AuthController extends Controller
         $validator = Validator::make($request->all(), [
             'UserID' => 'required|string',
             'OTPCode' => 'required|string|size:4',
-            'NewPassword' => 'required|string|size:6|confirmed',
+            'NewPassword' => 'required|string|min:6|confirmed',
         ]);
 
         if ($validator->fails()) {
