@@ -3616,6 +3616,9 @@ class ProjectController extends Controller
         }
 
         DB::beginTransaction();
+        $projectForNotification = null;
+        $taskDescriptionForNotification = null;
+        $notificationRecipientIds = [];
         try {
             $authUserId = $request->auth_user_id;
             $timestamp = Carbon::now()->timestamp;
@@ -3653,6 +3656,31 @@ class ProjectController extends Controller
                     'message' => 'Task not found',
                 ], 404);
             }
+
+            $projectForNotification = Project::where('ProjectID', $projectId)
+                ->where('IsDelete', false)
+                ->first();
+            $taskDescriptionForNotification = (string) $task->TaskDescription;
+
+            $assigneeUserIds = ProjectAssignMember::query()
+                ->join('ProjectMember', 'ProjectMember.ProjectMemberID', '=', 'ProjectAssignMember.ProjectMemberID')
+                ->where('ProjectAssignMember.ProjectTaskID', $taskId)
+                ->where('ProjectMember.IsActive', true)
+                ->pluck('ProjectMember.UserID')
+                ->map(static fn($id) => (int) $id)
+                ->all();
+
+            $ownerUserIds = ProjectMember::where('ProjectID', $projectId)
+                ->where('IsOwner', true)
+                ->where('IsActive', true)
+                ->pluck('UserID')
+                ->map(static fn($id) => (int) $id)
+                ->all();
+
+            $notificationRecipientIds = array_values(array_unique(array_merge(
+                $assigneeUserIds,
+                $ownerUserIds
+            )));
 
             $oldData = $task->toArray();
 
@@ -3692,6 +3720,16 @@ class ProjectController extends Controller
             ]);
 
             DB::commit();
+
+            if (!empty($notificationRecipientIds)) {
+                $this->sendAssigneeNotification(
+                    $projectForNotification,
+                    $taskId,
+                    $taskDescriptionForNotification,
+                    $notificationRecipientIds,
+                    'deleted'
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -6002,6 +6040,10 @@ class ProjectController extends Controller
             $subject = 'Task Ditolak Owner';
             $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" ditolak owner. Silakan update progress kembali.";
             $fieldName = 'Task Rejected';
+        } elseif ($type === 'deleted') {
+            $subject = 'Task Deleted Notification';
+            $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" telah dihapus.";
+            $fieldName = 'Task Deleted';
         } elseif ($type === 'approved') {
             $subject = 'Task Disetujui Owner';
             $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" telah disetujui owner.";

@@ -115,6 +115,29 @@ class SystemReferenceSeeder extends Seeder
             ],
             [
                 'ReferenceName' => 'Project',
+                'FieldName' => 'Task Deleted',
+                'FieldValue' => $this->buildHtmlTemplate(
+                    'Task Deleted Notification',
+                    '<p style="margin:0 0 12px 0;">Hello, <strong>{{recipient_name}}</strong></p>
+                    <p style="margin:0 0 12px 0;color:#737373;">
+                        A task, <strong style="color:#1f2937;">{{task_description}}</strong>, within
+                        <strong style="color:#1f2937;">{{project_name}}</strong> has been deleted.
+                    </p>
+                    <p style="margin:0 0 20px 0;color:#737373;">
+                        Kindly review the current project task details.
+                        For further details, please click below:
+                    </p>
+                    <table cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 8px auto;">
+                        <tr>
+                            <td style="background:linear-gradient(90deg,#c840d4,#e970f7,#f7b5fd);border-radius:12px;">
+                                <a href="{{site_name}}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 28px;color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">View Project -&gt;</a>
+                            </td>
+                        </tr>
+                    </table>'
+                ),
+            ],
+            [
+                'ReferenceName' => 'Project',
                 'FieldName' => 'Task Rejected',
                 'FieldValue' => $this->buildHtmlTemplate(
                     'Informasi Penolakan Task',
