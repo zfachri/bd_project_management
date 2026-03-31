@@ -68,10 +68,16 @@ class SystemReferenceController extends Controller
             ], 404);
         }
 
+        $referenceData = $reference->toArray();
+        $fieldValue = (string) ($referenceData['FieldValue'] ?? '');
+        preg_match_all('/{{\s*([a-zA-Z0-9_]+)\s*}}/', $fieldValue, $matches);
+        $variables = array_values(array_unique($matches[1] ?? []));
+        $referenceData['Variables'] = $variables;
+
         return response()->json([
             'success' => true,
             'message' => 'System reference retrieved successfully',
-            'data' => $reference,
+            'data' => $referenceData,
         ], 200);
     }
 

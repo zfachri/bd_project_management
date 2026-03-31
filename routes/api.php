@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\ProjectFilterController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\SystemReferenceController;
+use App\Http\Controllers\Api\EmailTestController;
 
 /*
 |--------------------------------------------------------------------------
@@ -341,5 +342,9 @@ Route::middleware(['jwt.auth', 'force.password.change'])->group(function () {
         Route::post('/', [SystemReferenceController::class, 'store']);
         Route::put('/{id}', [SystemReferenceController::class, 'update']);
         Route::delete('/{id}', [SystemReferenceController::class, 'destroy']);
+    });
+
+    Route:: prefix('test-email')->group(function() {
+        Route::post('/', [EmailTestController::class, 'index']);
     });
 });

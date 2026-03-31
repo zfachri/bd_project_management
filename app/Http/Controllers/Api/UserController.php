@@ -142,6 +142,7 @@ class UserController extends Controller
 
             // Create user with IsAdministrator = 1
             $defaultPassword = random_string(6).$salt;
+            $sendPassword = substr($defaultPassword, 0, 6);
             $user = User::create([
                 'UserID' => Carbon::now()->timestamp . random_numbersu(5),
                 'AtTimeStamp' => $timestamp,
@@ -181,7 +182,7 @@ class UserController extends Controller
                 'Note' => 'New administrator user created'
             ]);
 
-            $this->sendNewUserCredentialEmail($user, $defaultPassword);
+            $this->sendNewUserCredentialEmail($user, $sendPassword);
 
             return response()->json([
                 'success' => true,
