@@ -125,17 +125,17 @@ class DocumentManagement extends Model
     }
 
     /**
-     * Generate DocumentManagementID with format: YYYYMMDD + 4-digit sequence.
-     * Example: 202603130001, 202603130002, ...
+     * Generate DocumentManagementID with format: YYYYMMDD + 5-digit sequence.
+     * Example: 2026033100001, 2026033100002, ...
      */
     public static function generateDailyDocumentManagementId(?Carbon $date = null): int
     {
         $targetDate = ($date ?? Carbon::now())->startOfDay();
         $prefix = (int) $targetDate->format('Ymd');
-        $base = $prefix * 10000;
+        $base = $prefix * 100000;
 
         $maxId = self::query()
-            ->whereBetween('DocumentManagementID', [$base, $base + 9999])
+            ->whereBetween('DocumentManagementID', [$base, $base + 99999])
             ->lockForUpdate()
             ->max('DocumentManagementID');
 
