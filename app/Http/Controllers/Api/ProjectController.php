@@ -4925,7 +4925,9 @@ class ProjectController extends Controller
                 'ProjectTaskFileID',
                 'ProjectTaskID',
                 'OriginalFileName',
+                'ConvertedFileName',
                 'DocumentOriginalUrl',
+                'DocumentUrl',
                 'ByUserID',
                 'OperationCode',
             ])
@@ -4972,6 +4974,8 @@ class ProjectController extends Controller
                         'ProjectTaskFileID' => $file->ProjectTaskFileID,
                         'OriginalFileName' => $file->OriginalFileName,
                         'DocumentOriginalUrl' => $file->DocumentOriginalUrl,
+                        'ConvertedFileName' => $file->ConvertedFileName,
+                        'DocumentUrl' => $file->DocumentUrl,
                         'CreatedByUserID' => $createdById,
                         'LastEditedByUserID' => $lastEditedId,
                     ];
