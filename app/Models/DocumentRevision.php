@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -85,5 +86,23 @@ class DocumentRevision extends Model
     public function scopeDeclined($query)
     {
         return $query->where('Status', 'decline');
+    }
+
+    /**
+     * Generate DocumentRevisionID with format: YYYYMMDD + 5-digit sequence.
+     * Example: 2026033100001, 2026033100002, ...
+     */
+    public static function generateDailyDocumentRevisionId(?Carbon $date = null): int
+    {
+        $targetDate = ($date ?? Carbon::now())->startOfDay();
+        $prefix = (int) $targetDate->format('Ymd');
+        $base = $prefix * 100000;
+
+        $maxId = self::query()
+            ->whereBetween('DocumentRevisionID', [$base, $base + 99999])
+            ->lockForUpdate()
+            ->max('DocumentRevisionID');
+
+        return $maxId ? ((int) $maxId + 1) : ($base + 1);
     }
 }

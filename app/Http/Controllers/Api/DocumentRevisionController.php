@@ -128,7 +128,7 @@ class DocumentRevisionController extends Controller
 
             // Create revision request dengan VersionNo dari dokumen saat ini
             $revision = DocumentRevision::create([
-                'DocumentRevisionID' => $timestamp . random_numbersu(5),
+                'DocumentRevisionID' => DocumentRevision::generateDailyDocumentRevisionId(),
                 'DocumentManagementID' => $documentManagementId,
                 'ByUserID' => $authUserId,
                 'Comment' => $request->Comment,

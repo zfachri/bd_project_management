@@ -42,7 +42,7 @@ class DocumentSubmissionController extends Controller
 
             // Create submission request
             $submission = DocumentSubmission::create([
-                'DocumentSubmission' => $timestamp . random_numbersu(5),
+                'DocumentSubmission' => DocumentSubmission::generateDailyDocumentSubmissionId(),
                 'ByUserID' => $authUserId,
                 'OrganizationID' => $request->input('organization_id'),
                 'Comment' => $request->input('comment'),
