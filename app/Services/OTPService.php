@@ -23,7 +23,7 @@ class OTPService
      */
     private function getOTPExpiry()
     {
-        $reference = SystemReference::where('ReferenceName', 'User')
+        $reference = SystemReference::where('ReferenceName', 'System')
             ->where('FieldName', 'OTPExpiry')
             ->first();
         

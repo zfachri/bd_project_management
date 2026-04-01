@@ -31,7 +31,7 @@ class SystemReferenceSeeder extends Seeder
                 ]),
             ],
             [
-                'ReferenceName' => 'User',
+                'ReferenceName' => 'System',
                 'FieldName' => 'OTPExpiry',
                 'FieldValue' => '60',
             ],

@@ -661,7 +661,7 @@ class DocumentRevisionController extends Controller
             return;
         }
 
-        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $siteName = $this->getSystemReferenceValue('Document', 'Revision Request Site', '');
         $subject = 'Document Revision Request';
         $fallbackBody = "There is a document revision request for {$document->DocumentName}.";
 
@@ -692,7 +692,7 @@ class DocumentRevisionController extends Controller
             return;
         }
 
-        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $siteName = $this->getSystemReferenceValue('Document', 'Revision Approved Site', '');
         $subject = 'Document Revision Approved';
         $fallbackBody = "The document revision request for {$document->DocumentName} has been approved.";
 
@@ -722,7 +722,7 @@ class DocumentRevisionController extends Controller
             return;
         }
 
-        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $siteName = $this->getSystemReferenceValue('Document', 'Revision Declined Site', '');
         $subject = 'Document Revision Declined';
         $fallbackBody = "The document revision request for {$document->DocumentName} has been declined.";
 

@@ -489,7 +489,7 @@ class DocumentSubmissionController extends Controller
             return;
         }
 
-        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $siteName = $this->getSystemReferenceValue('Document', 'Submission Request Site', '');
         $documentName = $this->resolveSubmissionDocumentName($submission);
         $subject = 'Document Submission Request';
         $fallbackBody = "There is a document submission request for {$documentName}.";
@@ -518,7 +518,7 @@ class DocumentSubmissionController extends Controller
             return;
         }
 
-        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $siteName = $this->getSystemReferenceValue('Document', 'Submission Approved Site', '');
         $documentName = $this->resolveSubmissionDocumentName($submission);
         $subject = 'Document Submission Approved';
         $fallbackBody = "The submission for {$documentName} has been approved.";
@@ -545,7 +545,7 @@ class DocumentSubmissionController extends Controller
             return;
         }
 
-        $siteName = $this->getSystemReferenceValue('System', 'Site Name', 'https://www.valista.co.id/bd-app/login');
+        $siteName = $this->getSystemReferenceValue('Document', 'Submission Declined Site', '');
         $documentName = $this->resolveSubmissionDocumentName($submission);
         $subject = 'Document Submission Declined';
         $fallbackBody = "The submission for {$documentName} has been declined.";

@@ -21,21 +21,22 @@ class DatabaseSeeder extends Seeder
         $this->call([
             // UserSeeder::class,
             SystemReferenceSeeder::class,
+            SystemReferenceSiteSeeder::class,
             SystemReferenceUserCredentialSeeder::class,
             // OrganizationSeeder::class,
             // PositionLevelSeeder::class,
             // 3. Position data (depends on: Organization, PositionLevel)
-            PositionSeeder::class,
+            // PositionSeeder::class,
 
             // 4. Job Description data (depends on: Position, Organization)
-            JobDescriptionSeeder::class,
+            // JobDescriptionSeeder::class,
 
             // 5. Employee data with User and LoginCheck (depends on: Organization)
-            EmployeeSeeder::class,
+            // EmployeeSeeder::class,
 
             // 6. Employee Position data (depends on: Employee, Position, Organization)
-            EmployeePositionSeeder::class,
-            RoleSeeder::class,
+            // EmployeePositionSeeder::class,
+            // RoleSeeder::class,
         ]);
 
         $this->command->info('✅ All seeders completed successfully!');

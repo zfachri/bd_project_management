@@ -5955,9 +5955,9 @@ class ProjectController extends Controller
         }
 
         $recipientName = (string) (User::where('UserID', $memberUserId)->value('FullName') ?: 'Username');
-        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
-            ->where('FieldName', 'Site Name')
-            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+        $siteName = (string) (SystemReference::where('ReferenceName', 'Project')
+            ->where('FieldName', 'Add Member Site')
+            ->value('FieldValue') ?: '');
 
         $subject = 'Project Member Added';
         $body = "Dengan hormat,\n\n"
@@ -5993,9 +5993,9 @@ class ProjectController extends Controller
         }
 
         $recipientName = (string) (User::where('UserID', $memberUserId)->value('FullName') ?: 'Username');
-        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
-            ->where('FieldName', 'Site Name')
-            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+        $siteName = (string) (SystemReference::where('ReferenceName', 'Project')
+            ->where('FieldName', 'Remove Member Site')
+            ->value('FieldValue') ?: '');
 
         $subject = 'Project Member Removed';
         $body = "Dengan hormat,\n\n"
@@ -6027,9 +6027,9 @@ class ProjectController extends Controller
             return;
         }
 
-        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
-            ->where('FieldName', 'Site Name')
-            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+        $siteName = (string) (SystemReference::where('ReferenceName', 'Project')
+            ->where('FieldName', 'Add Project Site')
+            ->value('FieldValue') ?: '');
 
         $subject = 'Project Successfully Created';
         $body = "Project \"{$project->ProjectName}\" sudah dibuat dan Anda terdaftar sebagai member.";
@@ -6065,9 +6065,9 @@ class ProjectController extends Controller
             return;
         }
 
-        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
-            ->where('FieldName', 'Site Name')
-            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
+        $siteName = (string) (SystemReference::where('ReferenceName', 'Project')
+            ->where('FieldName', 'Add Expense Site')
+            ->value('FieldValue') ?: '');
 
         $subject = 'Project Add Expense';
         $body = "Expense baru ditambahkan pada project {$project->ProjectName} ({$project->ProjectID}) "
@@ -6106,10 +6106,6 @@ class ProjectController extends Controller
             return;
         }
 
-        $siteName = (string) (SystemReference::where('ReferenceName', 'System')
-            ->where('FieldName', 'Site Name')
-            ->value('FieldValue') ?: 'https://www.valista.co.id/bd-app/login');
-
         if ($type === 'rejected') {
             $subject = 'Task Ditolak Owner';
             $body = "Task #{$taskId} ({$taskDescription}) pada project \"{$project->ProjectName}\" ditolak owner. Silakan update progress kembali.";
@@ -6127,6 +6123,10 @@ class ProjectController extends Controller
             $body = "Anda ditugaskan pada task #{$taskId} ({$taskDescription}) di project \"{$project->ProjectName}\".";
             $fieldName = 'Add Task Assignment';
         }
+
+        $siteName = (string) (SystemReference::where('ReferenceName', 'Project')
+            ->where('FieldName', $fieldName . ' Site')
+            ->value('FieldValue') ?: '');
 
         $this->sendTemplatedEmail(
             $emails,
