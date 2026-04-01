@@ -5799,13 +5799,17 @@ class ProjectController extends Controller
                 'ProjectTask.ProjectID',
                 'ProjectTask.TaskDescription',
                 'ProjectTask.EndDate',
+                'ProjectTask.IsCheck',
+                'ProjectTask.ProgressBar',
                 'Project.ProjectName',
             ])
             ->where('ProjectTask.IsDelete', false)
             ->where('Project.IsDelete', false)
             ->whereIn('ProjectStatus.ProjectStatusCode', ['10', '11', '12'])
-            ->where('ProjectTask.ProgressBar', '<', 100)
-            ->whereDate('ProjectTask.EndDate', '>=', $baseDate->copy()->format('Y-m-d'))
+            ->where(function ($query) {
+                $query->where('ProjectTask.ProgressBar', '<', 100)
+                    ->orWhere('ProjectTask.IsCheck', false);
+            })
             ->whereDate('ProjectTask.EndDate', '<=', $baseDate->copy()->addDays($maxReminderDay)->format('Y-m-d'));
 
         if ($request->filled('ProjectID')) {
@@ -5816,15 +5820,19 @@ class ProjectController extends Controller
 
         $totalEmailsSent = 0;
         $totalTasksMatched = 0;
+        $totalTasksEvaluated = 0;
+        $totalTasksSkippedNoRecipients = 0;
         $taskResults = [];
 
         foreach ($tasks as $task) {
             $dueDate = Carbon::parse($task->EndDate)->startOfDay();
             $daysLeft = $baseDate->diffInDays($dueDate, false);
 
-            if (!in_array($daysLeft, $reminderDays, true)) {
+             if ($daysLeft >= 0 && !in_array($daysLeft, $reminderDays, true)) {
                 continue;
             }
+
+            $totalTasksEvaluated++;
 
             $ownerUserId = ProjectMember::where('ProjectID', $task->ProjectID)
                 ->where('IsOwner', true)
@@ -5846,14 +5854,21 @@ class ProjectController extends Controller
 
             $emails = $this->resolveEmailsFromUserOrEmployeeIds($recipientIds);
             if (empty($emails)) {
+                $totalTasksSkippedNoRecipients++;
                 continue;
             }
 
-            $dayLabel = $daysLeft === 0 ? 'H0' : ('D-' . $daysLeft);
+            $dayLabel = match (true) {
+                $daysLeft < 0 => 'OVERDUE+' . abs($daysLeft),
+                $daysLeft === 0 => 'H0',
+                default => 'D-' . $daysLeft,
+            };
             $dueDateFormatted = $dueDate->format('Y-m-d');
 
             $subject = "Reminder Due Date Task {$dayLabel}";
-            $body = "Pengingat due date task #{$task->ProjectTaskID} ({$task->TaskDescription}) "
+           $body = $daysLeft < 0
+                ? "Task #{$task->ProjectTaskID} ({$task->TaskDescription}) pada project \"{$task->ProjectName}\" sudah melewati due date {$dueDateFormatted} ({$dayLabel})."
+                :  "Pengingat due date task #{$task->ProjectTaskID} ({$task->TaskDescription}) "
                 . "pada project \"{$task->ProjectName}\" jatuh pada {$dueDateFormatted} ({$dayLabel}).";
 
             $this->sendTemplatedEmail(
@@ -5889,7 +5904,9 @@ class ProjectController extends Controller
             'data' => [
                 'RunDate' => $baseDate->format('Y-m-d'),
                 'ReminderDays' => $reminderDays,
+                'TotalTasksEvaluated' => $totalTasksEvaluated,
                 'TotalTasksMatched' => $totalTasksMatched,
+                'TotalTasksSkippedNoRecipients' => $totalTasksSkippedNoRecipients,
                 'TotalEmailsSent' => $totalEmailsSent,
                 'Items' => $taskResults,
             ],
