@@ -81,8 +81,8 @@ class ProjectController extends Controller
             'mini_goals.*.MiniGoalCategoryCode' => 'required|in:1,2,3',
             'mini_goals.*.MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
             'mini_goals.*.MiniGoalLastPrefixCode' => 'nullable|string|max:10',
-            'mini_goals.*.TargetValue' => 'required|integer|min:0',
-            'mini_goals.*.ActualValue' => 'nullable|integer|min:0',
+            'mini_goals.*.TargetValue' => 'required|numeric|min:0',
+            'mini_goals.*.ActualValue' => 'nullable|numeric|min:0',
 
             // Tasks (opsional)
             'tasks' => 'nullable|array',
@@ -4232,8 +4232,8 @@ class ProjectController extends Controller
             'MiniGoalCategoryCode' => 'required|in:1,2,3', // 1=$, 2=%, 3=#
             'MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
             'MiniGoalLastPrefixCode' => 'nullable|string|max:10',
-            'TargetValue' => 'required|integer|min:0',
-            'ActualValue' => 'nullable|integer|min:0',
+            'TargetValue' => 'required|numeric|min:0',
+            'ActualValue' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -4331,8 +4331,8 @@ class ProjectController extends Controller
             'MiniGoalCategoryCode' => 'nullable|in:1,2,3',
             'MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
             'MiniGoalLastPrefixCode' => 'nullable|string|max:10',
-            'TargetValue' => 'nullable|integer|min:0',
-            'ActualValue' => 'nullable|integer|min:0',
+            'TargetValue' => 'nullable|numeric|min:0',
+            'ActualValue' => 'nullable|numeric|min:0',
             'Reason' => 'nullable|string|max:200'
         ]);
 
