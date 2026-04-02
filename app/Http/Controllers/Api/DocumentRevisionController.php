@@ -133,7 +133,8 @@ class DocumentRevisionController extends Controller
                 'ByUserID' => $authUserId,
                 'Comment' => $request->Comment,
                 'Status' => 'request',
-                'VersionNo' => $document->LatestVersionNo // Tambahkan VersionNo saat ini
+                'VersionNo' => $document->LatestVersionNo, // Tambahkan VersionNo saat ini
+                'created_at' => $timestamp
             ]);
 
             // kirim email ke semua admin
@@ -227,7 +228,8 @@ class DocumentRevisionController extends Controller
             $revision->update([
                 'Status' => 'approve',
                 'Notes' => $request->Notes,
-                'NotesByUserID' => $authUserId
+                'NotesByUserID' => $authUserId,
+                'updated_at' => $timestamp,
             ]);
 
             // Create audit log for revision approval
@@ -318,7 +320,8 @@ class DocumentRevisionController extends Controller
             $revision->update([
                 'Status' => 'decline',
                 'Notes' => $request->Notes,
-                'NotesByUserID' => $authUserId
+                'NotesByUserID' => $authUserId,
+                'updated_at' => $timestamp,
             ]);
 
             // Create audit log

@@ -21,7 +21,9 @@ class DocumentRevision extends Model
         'Status',
         'Notes',
         'NotesByUserID',
-        'VersionNo' 
+        'VersionNo',
+        'created_at',
+        'updated_at',
     ];
 
     protected $casts = [
@@ -29,7 +31,9 @@ class DocumentRevision extends Model
         'DocumentManagementID' => 'integer',
         'ByUserID' => 'integer',
         'NotesByUserID' => 'integer',
-        'VersionNo' => 'integer'
+        'VersionNo' => 'integer',
+        'created_at' => 'integer',
+        'updated_at' => 'integer',
     ];
 
     /**
