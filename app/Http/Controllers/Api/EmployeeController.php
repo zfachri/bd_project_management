@@ -2403,6 +2403,7 @@ class EmployeeController extends Controller
         $fallbackBody = "Dengan hormat,\n\n"
             . "Akun Anda telah berhasil dibuat.\n"
             . "UserID: {$user->UserID}\n"
+            . "Email: {$user->Email}\n"
             . "Password: {$plainPassword}\n"
             . "Link Login: {$siteName}\n\n"
             . "Mohon segera login dan ubah password Anda.\n\n"
@@ -2415,6 +2416,7 @@ class EmployeeController extends Controller
                 '{{year}}' => (string) date('Y'),
                 '{{full_name}}' => (string) ($user->FullName ?? '-'),
                 '{{user_id}}' => (string) $user->UserID,
+                '{{email}}' => (string) $user->Email,
                 '{{password}}' => $plainPassword,
                 '{{site_name}}' => $siteName,
             ]);

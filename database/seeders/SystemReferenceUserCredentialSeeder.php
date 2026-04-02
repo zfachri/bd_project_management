@@ -80,8 +80,12 @@ class SystemReferenceUserCredentialSeeder extends Seeder
                     <td style="padding:8px;border:1px solid #eceff4;">{{full_name}}</td>
                 </tr>
                 <tr>
-                    <td style="padding:8px;border:1px solid #eceff4;"><strong>UserID</strong></td>
+                    <td style="padding:8px;border:1px solid #eceff4;"><strong>Username</strong></td>
                     <td style="padding:8px;border:1px solid #eceff4;">{{user_id}}</td>
+                </tr>
+                <tr>
+                    <td style="padding:8px;border:1px solid #eceff4;"><strong>Email</strong></td>
+                    <td style="padding:8px;border:1px solid #eceff4;">{{email}}</td>
                 </tr>
                 <tr>
                     <td style="padding:8px;border:1px solid #eceff4;"><strong>Password</strong></td>
@@ -92,7 +96,7 @@ class SystemReferenceUserCredentialSeeder extends Seeder
                     <td style="padding:8px;border:1px solid #eceff4;"><a href="{{site_name}}" style="color:#004aad;text-decoration:none;">{{site_name}}</a></td>
                 </tr>
             </table>
-            <p>Mohon segera login dan lakukan perubahan password setelah pertama kali masuk.</p>
+            <p>Mohon segera login dengan menginput email serta password dan lakukan perubahan password setelah pertama kali masuk.</p>
             <p>Terima kasih.</p>
         </div>
         <div style="padding:14px 0 0 0;border-top:1px solid #eceff4;color:#6b7280;font-size:12px;text-align:center;">
