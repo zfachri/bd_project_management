@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Jobs\SendEmailNotificationJob;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\ProjectControllerHelpers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
 use App\Models\Employee;
@@ -6297,19 +6297,12 @@ class ProjectController extends Controller
 
     private function sendSimpleEmail(array $emails, string $subject, string $body): void
     {
-        foreach ($emails as $email) {
-            try {
-                Mail::raw($body, function ($message) use ($email, $subject) {
-                    $message->to($email)->subject($subject);
-                });
-            } catch (\Throwable $e) {
-                Log::warning('Failed to send project email notification', [
-                    'email' => $email,
-                    'subject' => $subject,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        $recipients = array_values(array_filter($emails, static fn ($email) => is_string($email) && trim($email) !== ''));
+        if (empty($recipients)) {
+            return;
         }
+
+        SendEmailNotificationJob::dispatch($recipients, $subject, $body, false, 'project')->onQueue('emails');
     }
 
     private function sendTemplatedEmail(
@@ -6367,19 +6360,12 @@ class ProjectController extends Controller
 
     private function sendHtmlEmail(array $emails, string $subject, string $htmlBody): void
     {
-        foreach ($emails as $email) {
-            try {
-                Mail::html($htmlBody, function ($message) use ($email, $subject) {
-                    $message->to($email)->subject($subject);
-                });
-            } catch (\Throwable $e) {
-                Log::warning('Failed to send project HTML email notification', [
-                    'email' => $email,
-                    'subject' => $subject,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        $recipients = array_values(array_filter($emails, static fn ($email) => is_string($email) && trim($email) !== ''));
+        if (empty($recipients)) {
+            return;
         }
+
+        SendEmailNotificationJob::dispatch($recipients, $subject, $htmlBody, true, 'project')->onQueue('emails');
     }
 
 }

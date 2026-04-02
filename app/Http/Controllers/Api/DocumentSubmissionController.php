@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\SendEmailNotificationJob;
 use App\Models\AuditLog;
 use App\Models\DocumentSubmission;
 use App\Models\SystemReference;
@@ -11,7 +12,6 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 
 class DocumentSubmissionController extends Controller
@@ -650,43 +650,23 @@ class DocumentSubmissionController extends Controller
 
     private function sendHtmlEmail(array $emails, string $subject, string $htmlBody): void
     {
-        foreach ($emails as $email) {
-            if (!is_string($email) || trim($email) === '') {
-                continue;
-            }
-
-            try {
-                Mail::html($htmlBody, function ($message) use ($email, $subject) {
-                    $message->to($email)->subject($subject);
-                });
-            } catch (\Throwable $e) {
-                Log::warning('Failed to send document submission HTML email', [
-                    'email' => $email,
-                    'subject' => $subject,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        $recipients = array_values(array_filter($emails, static fn ($email) => is_string($email) && trim($email) !== ''));
+        if (empty($recipients)) {
+            return;
         }
+
+        SendEmailNotificationJob::dispatch($recipients, $subject, $htmlBody, true, 'document_submission')
+            ->onQueue('emails');
     }
 
     private function sendSimpleEmail(array $emails, string $subject, string $body): void
     {
-        foreach ($emails as $email) {
-            if (!is_string($email) || trim($email) === '') {
-                continue;
-            }
-
-            try {
-                Mail::raw($body, function ($message) use ($email, $subject) {
-                    $message->to($email)->subject($subject);
-                });
-            } catch (\Throwable $e) {
-                Log::warning('Failed to send document submission fallback email', [
-                    'email' => $email,
-                    'subject' => $subject,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        $recipients = array_values(array_filter($emails, static fn ($email) => is_string($email) && trim($email) !== ''));
+        if (empty($recipients)) {
+            return;
         }
+
+        SendEmailNotificationJob::dispatch($recipients, $subject, $body, false, 'document_submission')
+            ->onQueue('emails');
     }
 }
