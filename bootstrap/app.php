@@ -7,7 +7,6 @@ use App\Http\Middleware\JWTMiddleware;
 use App\Http\Middleware\CheckPermission;
 use App\Http\Middleware\OrganizationAccessMiddleware;
 use App\Http\Middleware\ForcePasswordChangeMiddleware;
-use App\Http\Middleware\RoundFloatResponseMiddleware;
 use App\Http\Middleware\NormalizeDecimalInputMiddleware;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -26,7 +25,6 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->appendToGroup('api', NormalizeDecimalInputMiddleware::class);
-        $middleware->appendToGroup('api', RoundFloatResponseMiddleware::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
