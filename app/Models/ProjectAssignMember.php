@@ -25,6 +25,11 @@ class ProjectAssignMember extends Model
         return $this->belongsTo(ProjectMember::class, 'ProjectMemberID', 'ProjectMemberID');
     }
 
+    public function projectMember()
+    {
+        return $this->belongsTo(ProjectMember::class, 'ProjectMemberID', 'ProjectMemberID');
+    }
+
     public function task()
     {
         return $this->belongsTo(ProjectTask::class, 'ProjectTaskID', 'ProjectTaskID');

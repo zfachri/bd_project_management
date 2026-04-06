@@ -5788,7 +5788,16 @@ class ProjectController extends Controller
             ? Carbon::createFromFormat('Y-m-d', $request->RunDate)->startOfDay()
             : Carbon::now()->startOfDay();
 
-        $reminderDays = [30, 15, 7, 3, 2, 1, 0];
+        $scheduledReminderLabels = [
+            30 => 'H-30',
+            15 => 'H-15',
+            7 => 'H-7',
+            3 => 'H-3',
+            2 => 'H-2',
+            1 => 'H-1',
+            0 => 'H-0',
+        ];
+        $reminderDays = array_keys($scheduledReminderLabels);
         $maxReminderDay = max($reminderDays);
 
         $taskQuery = ProjectTask::query()
@@ -5828,7 +5837,11 @@ class ProjectController extends Controller
             $dueDate = Carbon::parse($task->EndDate)->startOfDay();
             $daysLeft = $baseDate->diffInDays($dueDate, false);
 
-             if ($daysLeft >= 0 && !in_array($daysLeft, $reminderDays, true)) {
+            $dayLabel = $daysLeft < 0
+                ? 'OVERDUE+' . abs($daysLeft)
+                : ($scheduledReminderLabels[$daysLeft] ?? null);
+
+            if ($dayLabel === null) {
                 continue;
             }
 
@@ -5858,11 +5871,6 @@ class ProjectController extends Controller
                 continue;
             }
 
-            $dayLabel = match (true) {
-                $daysLeft < 0 => 'OVERDUE+' . abs($daysLeft),
-                $daysLeft === 0 => 'H0',
-                default => 'D-' . $daysLeft,
-            };
             $dueDateFormatted = $dueDate->format('Y-m-d');
 
             $subject = "Reminder Due Date Task {$dayLabel}";
