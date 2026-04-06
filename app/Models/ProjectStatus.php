@@ -48,8 +48,13 @@ class ProjectStatus extends Model
     ];
 
     protected $casts = [
-        'AccumulatedExpense' => 'decimal:0',
+        'AccumulatedExpense' => 'decimal:2',
     ];
+
+    public function setAccumulatedExpenseAttribute($value): void
+    {
+        $this->attributes['AccumulatedExpense'] = round((float) $value, 2);
+    }
 
     public function project()
     {

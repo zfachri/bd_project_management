@@ -28,9 +28,19 @@ class MiniGoal extends Model
 
     protected $casts = [
         'IsDelete' => 'boolean',
-        'TargetValue' => 'double',
-        'ActualValue' => 'double',
+        'TargetValue' => 'decimal:2',
+        'ActualValue' => 'decimal:2',
     ];
+
+    public function setTargetValueAttribute($value): void
+    {
+        $this->attributes['TargetValue'] = round((float) $value, 2);
+    }
+
+    public function setActualValueAttribute($value): void
+    {
+        $this->attributes['ActualValue'] = round((float) $value, 2);
+    }
 
     public function project()
     {

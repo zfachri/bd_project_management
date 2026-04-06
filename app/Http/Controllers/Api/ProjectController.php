@@ -50,7 +50,7 @@ class ProjectController extends Controller
             'project.ProjectName' => 'required|string',
             'project.ProjectDescription' => 'required|string',
             'project.CurrencyCode' => 'nullable|string|max:3',
-            'project.BudgetAmount' => 'nullable|numeric',
+            'project.BudgetAmount' => 'nullable|numeric|decimal:0,2',
             'project.StartDate' => 'required|date_format:Y-m-d',
             'project.EndDate' => 'required|date_format:Y-m-d|after_or_equal:project.StartDate',
             'project.PriorityCode' => 'required|integer|in:1,2,3',
@@ -81,8 +81,8 @@ class ProjectController extends Controller
             'mini_goals.*.MiniGoalCategoryCode' => 'required|in:1,2,3',
             'mini_goals.*.MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
             'mini_goals.*.MiniGoalLastPrefixCode' => 'nullable|string|max:10',
-            'mini_goals.*.TargetValue' => 'required|numeric|min:0',
-            'mini_goals.*.ActualValue' => 'nullable|numeric|min:0',
+            'mini_goals.*.TargetValue' => 'required|numeric|decimal:0,2|min:0',
+            'mini_goals.*.ActualValue' => 'nullable|numeric|decimal:0,2|min:0',
 
             // Tasks (opsional)
             'tasks' => 'nullable|array',
@@ -92,7 +92,7 @@ class ProjectController extends Controller
             'tasks.*.TaskDescription' => 'required|string|max:200',
             'tasks.*.StartDate' => 'required|date_format:Y-m-d',
             'tasks.*.EndDate' => 'required|date_format:Y-m-d|after_or_equal:tasks.*.StartDate',
-            'tasks.*.ProgressBar' => 'nullable|numeric|min:0|max:100',
+            'tasks.*.ProgressBar' => 'nullable|numeric|decimal:0,2|min:0|max:100',
             'tasks.*.Note' => 'nullable|string',
 
             // Task Files (opsional)
@@ -113,7 +113,7 @@ class ProjectController extends Controller
             'expenses.*.ExpenseDate' => 'required|date_format:Y-m-d',
             'expenses.*.ExpenseNote' => 'required|string|max:200',
             'expenses.*.CurrencyCode' => 'required|string|max:3',
-            'expenses.*.ExpenseAmount' => 'required|numeric',
+            'expenses.*.ExpenseAmount' => 'required|numeric|decimal:0,2',
 
             // Expense Files (opsional)
             'expenses.*.files' => 'nullable|array',
@@ -658,7 +658,7 @@ class ProjectController extends Controller
             'project.ProjectCategoryID' => 'nullable|integer',
             'project.ProjectDescription' => 'required|string',
             'project.CurrencyCode' => 'nullable|string|max:3',
-            'project.BudgetAmount' => 'nullable|numeric',
+            'project.BudgetAmount' => 'nullable|numeric|decimal:0,2',
             'project.StartDate' => 'required|date_format:Y-m-d',
             'project.EndDate' => 'required|date_format:Y-m-d|after_or_equal:project.StartDate',
             'project.PriorityCode' => 'required|integer|in:1,2,3',
@@ -702,7 +702,7 @@ class ProjectController extends Controller
             'expenses.*.ExpenseDate' => 'required|date_format:Y-m-d',
             'expenses.*.ExpenseNote' => 'required|string|max:200',
             'expenses.*.CurrencyCode' => 'required|string|max:3',
-            'expenses.*.ExpenseAmount' => 'required|numeric',
+            'expenses.*.ExpenseAmount' => 'required|numeric|decimal:0,2',
 
             // Expense Files (opsional)
             'expenses.*.files' => 'nullable|array',
@@ -1790,7 +1790,7 @@ class ProjectController extends Controller
             'ProjectCategoryID' => 'nullable|integer',
             'ProjectName' => 'nullable|string',
             'CurrencyCode' => 'nullable|string|max:3',
-            'BudgetAmount' => 'nullable|numeric',
+            'BudgetAmount' => 'nullable|numeric|decimal:0,2',
             'StartDate' => 'nullable|date_format:Y-m-d',
             'EndDate' => 'nullable|date_format:Y-m-d|after_or_equal:StartDate',
             'PriorityCode' => 'nullable|integer|in:1,2,3',
@@ -2588,7 +2588,7 @@ class ProjectController extends Controller
             'TaskDescription' => 'required|string|max:200',
             'StartDate' => 'required|date_format:Y-m-d',
             'EndDate' => 'required|date_format:Y-m-d|after_or_equal:StartDate',
-            'ProgressBar' => 'nullable|numeric|min:0|max:100', // NEW   
+            'ProgressBar' => 'nullable|numeric|decimal:0,2|min:0|max:100', // NEW   
             'Note' => 'nullable|string',
 
             // Task Files (opsional)
@@ -2799,7 +2799,7 @@ class ProjectController extends Controller
             'TaskDescription' => 'nullable|string|max:200',
             'StartDate' => 'nullable|date_format:Y-m-d',
             'EndDate' => 'nullable|date_format:Y-m-d',
-            'ProgressBar' => 'nullable|numeric|min:0|max:100',
+            'ProgressBar' => 'nullable|numeric|decimal:0,2|min:0|max:100',
             'Note' => 'nullable|string',
             'IsCheck' => 'nullable|boolean',
 
@@ -3220,7 +3220,7 @@ class ProjectController extends Controller
             'TaskDescription' => 'nullable|string|max:200',
             'StartDate' => 'nullable|date_format:Y-m-d',
             'EndDate' => 'nullable|date_format:Y-m-d',
-            'ProgressBar' => 'nullable|numeric|min:0|max:100', // NEW
+            'ProgressBar' => 'nullable|numeric|decimal:0,2|min:0|max:100', // NEW
             'Note' => 'nullable|string',
             'IsCheck' => 'nullable|boolean',
 
@@ -3754,7 +3754,7 @@ class ProjectController extends Controller
             'ExpenseDate' => 'required|date_format:Y-m-d',
             'ExpenseNote' => 'required|string|max:200',
             'CurrencyCode' => 'required|string|max:3',
-            'ExpenseAmount' => 'required|numeric',
+            'ExpenseAmount' => 'required|numeric|decimal:0,2',
 
             // Expense Files (opsional)
             'files' => 'nullable|array',
@@ -3889,7 +3889,7 @@ class ProjectController extends Controller
             'ExpenseDate' => 'nullable|date_format:Y-m-d',
             'ExpenseNote' => 'nullable|string|max:200',
             'CurrencyCode' => 'nullable|string|max:3',
-            'ExpenseAmount' => 'nullable|numeric',
+            'ExpenseAmount' => 'nullable|numeric|decimal:0,2',
             'IsCheck' => 'nullable|boolean',
 
             // New Files to Add
@@ -4232,8 +4232,8 @@ class ProjectController extends Controller
             'MiniGoalCategoryCode' => 'required|in:1,2,3', // 1=$, 2=%, 3=#
             'MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
             'MiniGoalLastPrefixCode' => 'nullable|string|max:10',
-            'TargetValue' => 'required|numeric|min:0',
-            'ActualValue' => 'nullable|numeric|min:0',
+            'TargetValue' => 'required|numeric|decimal:0,2|min:0',
+            'ActualValue' => 'nullable|numeric|decimal:0,2|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -4331,8 +4331,8 @@ class ProjectController extends Controller
             'MiniGoalCategoryCode' => 'nullable|in:1,2,3',
             'MiniGoalFirstPrefixCode' => 'nullable|string|max:10',
             'MiniGoalLastPrefixCode' => 'nullable|string|max:10',
-            'TargetValue' => 'nullable|numeric|min:0',
-            'ActualValue' => 'nullable|numeric|min:0',
+            'TargetValue' => 'nullable|numeric|decimal:0,2|min:0',
+            'ActualValue' => 'nullable|numeric|decimal:0,2|min:0',
             'Reason' => 'nullable|string|max:200'
         ]);
 
@@ -4542,7 +4542,7 @@ class ProjectController extends Controller
             'ProgressCode'   => 'nullable|array',
             'ProgressCode.*' => 'integer|in:0,1,2,3,4',
             'ProgressBar'    => 'nullable|array|size:2',
-            'ProgressBar.*'  => 'numeric|min:0|max:100',
+            'ProgressBar.*'  => 'numeric|decimal:0,2|min:0|max:100',
             'IsCheck'     => 'nullable|boolean',
             'per_page'    => 'nullable|integer|min:1|max:100',
             'page'        => 'nullable|integer|min:1',

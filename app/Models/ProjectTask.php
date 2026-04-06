@@ -33,8 +33,13 @@ class ProjectTask extends Model
     protected $casts = [
         'IsDelete' => 'boolean',
         'IsCheck' => 'boolean',
-        'ProgressBar' => 'float', 
+        'ProgressBar' => 'float',
     ];
+
+    public function setProgressBarAttribute($value): void
+    {
+        $this->attributes['ProgressBar'] = round((float) $value, 2);
+    }
 
     public function project()
     {

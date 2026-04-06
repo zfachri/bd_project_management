@@ -28,8 +28,13 @@ class ProjectExpense extends Model
     protected $casts = [
         'IsDelete' => 'boolean',
         'IsCheck' => 'boolean',
-        'ExpenseAmount' => 'decimal:0',
+        'ExpenseAmount' => 'decimal:2',
     ];
+
+    public function setExpenseAmountAttribute($value): void
+    {
+        $this->attributes['ExpenseAmount'] = round((float) $value, 2);
+    }
 
     public function project()
     {

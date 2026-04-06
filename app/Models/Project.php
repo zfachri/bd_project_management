@@ -37,10 +37,15 @@ class Project extends Model
     protected $casts = [
         'IsChild' => 'boolean',
         'IsDelete' => 'boolean',
-        'BudgetAmount' => 'decimal:0',
+        'BudgetAmount' => 'decimal:2',
         'StartDate'  => 'date:Y-m-d',
         'EndDate'    => 'date:Y-m-d',
     ];
+
+    public function setBudgetAmountAttribute($value): void
+    {
+        $this->attributes['BudgetAmount'] = round((float) $value, 2);
+    }
 
     public function status()
     {
